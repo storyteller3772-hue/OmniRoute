@@ -177,11 +177,38 @@ async function stagePublish(store: Store, cfg: Config, job: JobRow): Promise<voi
   let init: { publish_id: string; upload_url: string };
   if (cfg.TIKTOK_PUBLISH_MODE === "direct") {
     const creator = await queryCreatorInfo(accessToken);
+
+    // Name the destination in the log. On an unattended public setup this is
+    // the only place the account being posted to is ever stated.
+    logger.info(
+      {
+        jobId: job.id,
+        account: creator.creator_username ?? "unknown",
+        privacyLevel: cfg.TIKTOK_PRIVACY_LEVEL,
+      },
+      "posting directly to TikTok profile"
+    );
+
     const allowed = creator.privacy_level_options ?? [];
     if (allowed.length && !allowed.includes(cfg.TIKTOK_PRIVACY_LEVEL)) {
       throw new TerminalJobError(
-        `TIKTOK_PRIVACY_LEVEL=${cfg.TIKTOK_PRIVACY_LEVEL} is not offered by this account (allowed: ${allowed.join(", ")})`
+        `TIKTOK_PRIVACY_LEVEL=${cfg.TIKTOK_PRIVACY_LEVEL} is not offered by this account (allowed: ${allowed.join(", ")}). ` +
+          `PUBLIC_TO_EVERYONE requires an audited app; an unaudited one can only post SELF_ONLY.`
       );
+    }
+
+    // The per-creator duration cap is returned by creator_info and varies by
+    // account. Checking it here costs one ffprobe; skipping it costs a full
+    // upload followed by a rejection.
+    const cap = creator.max_video_post_duration_sec;
+    if (typeof cap === "number" && cap > 0) {
+      const encoded = await probe(cfg.FFPROBE_PATH, job.output_path);
+      if (encoded.durationSec > cap) {
+        throw new TerminalJobError(
+          `clip is ${encoded.durationSec.toFixed(0)}s but this account may post at most ${cap}s - ` +
+            `lower CLIP_TARGET_SECONDS to ${cap} or less`
+        );
+      }
     }
     init = await initDirectPost(accessToken, plan, {
       title: job.caption ?? "",

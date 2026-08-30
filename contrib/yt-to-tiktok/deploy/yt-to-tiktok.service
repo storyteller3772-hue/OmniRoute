@@ -1,0 +1,48 @@
+# Systemd unit for an unattended install.
+#
+#   sudo cp deploy/yt-to-tiktok.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now yt-to-tiktok
+#   journalctl -u yt-to-tiktok -f
+#
+# Adjust User, WorkingDirectory and ExecStart to match your install.
+
+[Unit]
+Description=yt-to-tiktok - repurpose own YouTube uploads to TikTok
+Documentation=file:///opt/yt-to-tiktok/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yt2tt
+Group=yt2tt
+WorkingDirectory=/opt/yt-to-tiktok
+EnvironmentFile=/opt/yt-to-tiktok/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node dist/main.js
+
+# An encode can be long; give it room to finish before a stop is escalated.
+Restart=always
+RestartSec=10
+TimeoutStopSec=120
+KillSignal=SIGTERM
+
+# The process needs its data dir and the masters; nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/yt-to-tiktok/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=yt-to-tiktok
+
+[Install]
+WantedBy=multi-user.target

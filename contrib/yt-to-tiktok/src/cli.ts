@@ -26,6 +26,7 @@ const USAGE = `yt-to-tiktok
   mark-published <id> [--post-id X]  Record that a handed-off job went live
   mark-failed <id> <reason>        Record that a handed-off job could not be published
   status                           Show subscription, token and job summary
+  whoami                           Show WHICH TikTok account posts will go to
   doctor                           Check config and external tools
 `;
 
@@ -62,6 +63,8 @@ async function main(): Promise<number> {
       return withStore(cfg, (s) => markFailedCmd(s, args));
     case "status":
       return withStore(cfg, (s) => statusCmd(s, cfg));
+    case "whoami":
+      return withStore(cfg, (s) => whoamiCmd(s, cfg));
     case "doctor":
       return withStore(cfg, (s) => doctorCmd(s, cfg));
     default:
@@ -349,6 +352,44 @@ async function statusCmd(store: Store, cfg: Config): Promise<number> {
   );
 
   process.stdout.write(`${out.join("\n")}\n`);
+  return 0;
+}
+
+/**
+ * Answers "which account will this post to" authoritatively, by asking TikTok
+ * rather than by reading config - the destination is a property of the stored
+ * token, and nothing else in the setup names it.
+ */
+async function whoamiCmd(store: Store, cfg: Config): Promise<number> {
+  if (!cfg.TIKTOK_CLIENT_KEY || !cfg.TIKTOK_CLIENT_SECRET) {
+    process.stderr.write("TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET are not configured\n");
+    return 1;
+  }
+  const { getAccessToken } = await import("./tiktok/oauth.js");
+  const { queryCreatorInfo } = await import("./tiktok/publish.js");
+
+  const accessToken = await getAccessToken(store, {
+    clientKey: cfg.TIKTOK_CLIENT_KEY,
+    clientSecret: cfg.TIKTOK_CLIENT_SECRET,
+  });
+  const info = await queryCreatorInfo(accessToken);
+  const options = info.privacy_level_options ?? [];
+
+  process.stdout.write(
+    `account:   @${info.creator_username ?? "unknown"}\n` +
+      `nickname:  ${info.creator_nickname ?? "-"}\n` +
+      `max post:  ${info.max_video_post_duration_sec ?? "?"}s\n` +
+      `privacy:   ${options.join(", ") || "unknown"}\n` +
+      `configured: ${cfg.TIKTOK_PRIVACY_LEVEL} (mode=${cfg.TIKTOK_PUBLISH_MODE})\n`
+  );
+
+  if (options.length && !options.includes(cfg.TIKTOK_PRIVACY_LEVEL)) {
+    process.stdout.write(
+      `\n  !!  ${cfg.TIKTOK_PRIVACY_LEVEL} is NOT available on this account.\n` +
+        `      Public posting requires an audited app.\n`
+    );
+    return 1;
+  }
   return 0;
 }
 

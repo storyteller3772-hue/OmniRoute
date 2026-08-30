@@ -1,6 +1,7 @@
 import { loadConfig } from "./config.js";
 import { openStore } from "./db.js";
 import { logger } from "./logger.js";
+import { checkRuntimeConfig } from "./preflight.js";
 import { createHttpServer } from "./server.js";
 import { startWorker } from "./pipeline/worker.js";
 import { startPoller } from "./youtube/poller.js";
@@ -8,6 +9,15 @@ import { callbackUrlFor, ensureSubscription, topicUrlFor } from "./youtube/websu
 
 async function main(): Promise<void> {
   const cfg = loadConfig();
+
+  // Refuse to start on configuration that would only fail at the first publish.
+  const { fatal, warnings } = checkRuntimeConfig(cfg);
+  for (const w of warnings) logger.warn(w);
+  if (fatal.length) {
+    for (const f of fatal) logger.fatal(f);
+    throw new Error(`${fatal.length} fatal configuration problem(s); refusing to start`);
+  }
+
   const store = openStore(cfg.DATA_DIR);
 
   const server = createHttpServer(store, cfg);
@@ -20,7 +30,10 @@ async function main(): Promise<void> {
   if (cfg.REQUIRE_REVIEW) {
     logger.info("REQUIRE_REVIEW is on - nothing uploads until you approve it");
   } else {
-    logger.warn("REQUIRE_REVIEW is OFF - encodes will publish automatically");
+    logger.warn(
+      { mode: cfg.TIKTOK_PUBLISH_MODE, privacy: cfg.TIKTOK_PRIVACY_LEVEL },
+      "REQUIRE_REVIEW is OFF - encodes will publish automatically"
+    );
   }
 
   // WebSub subscription plus renewal. The lease is finite, so renewal is not

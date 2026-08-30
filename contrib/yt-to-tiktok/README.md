@@ -134,6 +134,80 @@ account does not offer.
 `TIKTOK_PRIVACY_LEVEL` defaults to `SELF_ONLY`. Raise it once you have watched a
 few go through.
 
+## Fully automatic public posting
+
+This is the only configuration where an upload reaches an audience with nobody
+in the loop. It needs an **audited** TikTok app — an unaudited one can call
+Direct Post but is restricted to `SELF_ONLY`, so posts land private.
+
+```ini
+TIKTOK_PUBLISH_MODE=direct
+TIKTOK_PRIVACY_LEVEL=PUBLIC_TO_EVERYONE
+REQUIRE_REVIEW=false
+TIKTOK_CLIENT_KEY=...
+TIKTOK_CLIENT_SECRET=...
+TIKTOK_REDIRECT_URI=https://your-public-url/oauth/tiktok/callback
+```
+
+Order of operations, because the audit is the long pole:
+
+1. Register the app and add the Content Posting API product with **Direct Post**
+   enabled. Request `user.info.basic` and `video.publish`.
+2. Run with `TIKTOK_PRIVACY_LEVEL=SELF_ONLY` and `REQUIRE_REVIEW=true`. Posts go
+   to your profile privately — only you can see them. Watch a few land.
+3. Submit the app for audit.
+4. Once approved, switch to `PUBLIC_TO_EVERYONE` and `REQUIRE_REVIEW=false`.
+
+Confirm which account you are actually posting to before you flip anything:
+
+```bash
+npm run cli -- whoami
+```
+
+```
+account:   @yellowdonutt
+nickname:  Yellow Donut
+max post:  600s
+privacy:   PUBLIC_TO_EVERYONE, MUTUAL_FOLLOW_FRIENDS, SELF_ONLY
+configured: PUBLIC_TO_EVERYONE (mode=direct)
+```
+
+The destination is a property of the stored OAuth token, not a setting — whichever
+account authorised the app is where posts go. `whoami` is the only way to check,
+and it exits non-zero if your configured privacy level is not available on that
+account, which is how an unaudited app shows up.
+
+On startup the process refuses to run on configuration that would fail at the
+first publish (credentials missing, a source command that is not set), warns about
+configuration that silently does nothing, and states the unattended-public
+combination explicitly in the log.
+
+Two things are enforced per job against the account's own limits, before any
+bytes are uploaded: the privacy level must be one the account offers, and the
+clip must fit `max_video_post_duration_sec`. Both come from `creator_info`, and
+both would otherwise surface as a rejection after a completed upload.
+
+## Running it 24/7
+
+Unattended posting needs the process to survive reboots. `deploy/` has both:
+
+```bash
+# systemd
+sudo cp deploy/yt-to-tiktok.service /etc/systemd/system/
+sudo systemctl enable --now yt-to-tiktok
+journalctl -u yt-to-tiktok -f
+
+# docker
+docker build -f deploy/Dockerfile -t yt-to-tiktok .
+docker run -d --name yt2tt --env-file .env -p 8787:8787 \
+  -v "$PWD/data:/app/data" \
+  -v /path/to/masters:/app/data/masters:ro \
+  yt-to-tiktok
+```
+
+The image carries FFmpeg. Masters mount read-only; only `./data` is written.
+You still need a public HTTPS URL pointing at the container for WebSub.
+
 ## Handoff mode
 
 Use this when you do not want to register a TikTok developer app, or you want
@@ -200,6 +274,7 @@ npm run cli -- approve 12
 npm run cli -- reject 13
 npm run cli -- ingest dQw4w9WgXcQ --force   # queue one by hand
 npm run cli -- status
+npm run cli -- whoami            # which TikTok account posts go to
 ```
 
 Set `DRY_RUN=true` to run the whole pipeline and stop short of uploading —
@@ -235,7 +310,7 @@ all resolve to one job.
 ## Tests
 
 ```bash
-npm test          # 187 tests, node:test
+npm test          # 201 tests, node:test
 npm run typecheck
 ```
 

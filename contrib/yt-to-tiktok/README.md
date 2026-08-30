@@ -61,6 +61,28 @@ YouTube upload
 ## Setup
 
 ```bash
+./setup.sh
+```
+
+Checks your tools, installs, builds, generates secrets, resolves your channel
+id, writes `.env`, brings up the ngrok tunnel, starts the app, verifies the
+outside world can actually reach your legal pages, and prints exactly what to
+paste into the TikTok portal. Safe to re-run — it keeps existing `.env` values
+and backs the file up before rewriting.
+
+You need three things first, none of which can be automated: a **YouTube Data
+API key**, an **ngrok account with a claimed static domain**, and later a
+**TikTok developer app**. The script tells you when each is missing and where
+to get it.
+
+It writes a deliberately conservative config — `SELF_ONLY` privacy with review
+on, so early posts are private to you and nothing publishes unattended until
+you change it.
+
+<details>
+<summary>Manual setup instead</summary>
+
+```bash
 npm install
 cp .env.example .env
 ```
@@ -115,6 +137,8 @@ Set `SOURCE_WAIT_SECONDS` if your render tends to finish just after the upload.
 ```bash
 npm run cli -- doctor
 ```
+
+</details>
 
 ## Publish modes
 

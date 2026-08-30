@@ -5,3 +5,9 @@ data/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# setup.sh runtime output
+ngrok.log
+app.log
+.env.bak.*
+legal-export/

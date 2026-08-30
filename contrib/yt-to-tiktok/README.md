@@ -187,6 +187,24 @@ bytes are uploaded: the privacy level must be one the account offers, and the
 clip must fit `max_video_post_duration_sec`. Both come from `creator_info`, and
 both would otherwise surface as a rejection after a completed upload.
 
+### Legal pages
+
+TikTok will not let you add products or submit for audit until a Terms of
+Service and a Privacy Policy are publicly reachable. The app serves both from
+the same origin as the OAuth callback:
+
+```
+https://your-public-url/legal/terms
+https://your-public-url/legal/privacy
+```
+
+Set `LEGAL_ENTITY_NAME` and `LEGAL_CONTACT_EMAIL` so they carry a real contact.
+They are deliberately outside the `REVIEW_TOKEN` gate — the reviewer fetches
+them unauthenticated. Read them before submitting: they describe this system's
+actual behaviour, but they are not legal advice.
+
+`docs/tiktok-app-submission.md` has the rest of the submission copy.
+
 ## Running it 24/7
 
 Unattended posting needs the process to survive reboots. `deploy/` has both:
@@ -310,7 +328,7 @@ all resolve to one job.
 ## Tests
 
 ```bash
-npm test          # 201 tests, node:test
+npm test          # 212 tests, node:test
 npm run typecheck
 ```
 

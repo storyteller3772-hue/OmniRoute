@@ -8,6 +8,7 @@ import { parseYouTubeFeed } from "./util/atom.js";
 import { ingestCandidate } from "./pipeline/ingest.js";
 import { topicUrlFor } from "./youtube/websub.js";
 import { exchangeCode, persistTokens } from "./tiktok/oauth.js";
+import { renderPrivacy, renderTerms } from "./legal.js";
 
 /** Feed notifications are small; anything larger is not one. */
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -73,6 +74,15 @@ async function handle(
   const path = url.pathname.replace(/\/+$/, "") || "/";
 
   if (path === "/healthz") return send(res, 200, "ok");
+
+  // Public by design: TikTok's reviewer must be able to fetch these without
+  // credentials, so they sit outside the REVIEW_TOKEN gate.
+  if (path === "/legal/terms" && req.method === "GET") {
+    return send(res, 200, renderTerms(cfg), "text/html");
+  }
+  if (path === "/legal/privacy" && req.method === "GET") {
+    return send(res, 200, renderPrivacy(cfg), "text/html");
+  }
 
   // ---- WebSub verification handshake ----
   if (path === "/websub/youtube" && req.method === "GET") {

@@ -125,6 +125,15 @@ const schema = z.object({
   CAPTION_HASHTAGS: csv.default(""),
   CAPTION_MAX_LENGTH: z.coerce.number().int().min(1).default(2200),
 
+  // ---- legal pages ----
+  /**
+   * Identity shown on the served Terms and Privacy pages. TikTok requires both
+   * to be publicly reachable before an app can add products or be submitted.
+   */
+  LEGAL_ENTITY_NAME: z.string().min(1).default("The operator of this service"),
+  LEGAL_CONTACT_EMAIL: z.string().email().optional(),
+  LEGAL_EFFECTIVE_DATE: z.string().optional(),
+
   // ---- safety ----
   /**
    * Nothing reaches TikTok until a human approves it. Turning this off is a

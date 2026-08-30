@@ -7,128 +7,124 @@ The app needs one public HTTPS origin so that:
 - TikTok's reviewer can fetch your Terms and Privacy pages.
 
 **The URL must be stable.** It gets registered as your TikTok redirect URI and
-submitted as your policy links. If it changes, OAuth breaks and the reviewer
-gets a dead link. This rules out throwaway tunnel URLs — see the bottom.
+submitted as your policy links. If it changes, OAuth fails with a redirect-uri
+mismatch and the reviewer gets a dead link.
 
 ---
 
-## Option A — Tailscale Funnel (recommended)
+## ngrok
 
-Free, a stable hostname, a valid certificate, and no domain of your own.
+The free tier includes **one static domain**, which is what makes it usable
+here. The random URL from a bare `ngrok http 8787` is not.
 
 ```bash
-# 1. install (macOS: brew install tailscale, or see tailscale.com/download)
+# 1. install - https://ngrok.com/download  (macOS: brew install ngrok)
+
+# 2. sign up (free), then from the dashboard's "Your Authtoken" page:
+ngrok config add-authtoken <YOUR_TOKEN>
+
+# 3. claim your free static domain:
+#    dashboard -> Domains -> Create Domain
+#    you get something like  yellowdonut.ngrok-free.app
+
+# 4. bind the tunnel to it
+ngrok http 8787 --url=yellowdonut.ngrok-free.app
+```
+
+On older ngrok builds the flag is `--domain=` rather than `--url=`. Check with
+`ngrok http --help | grep -E "url|domain"`.
+
+```ini
+PUBLIC_URL=https://yellowdonut.ngrok-free.app
+TIKTOK_REDIRECT_URI=https://yellowdonut.ngrok-free.app/oauth/tiktok/callback
+```
+
+### Keeping it running
+
+`ngrok` in a terminal dies when the terminal closes. To keep it up:
+
+```bash
+# macOS / Linux, quick and dirty
+nohup ngrok http 8787 --url=yellowdonut.ngrok-free.app > ~/ngrok.log 2>&1 &
+
+# or as a systemd user service (Linux)
+systemctl --user enable --now ngrok
+```
+
+`ngrok`'s local dashboard at <http://127.0.0.1:4040> shows live requests, which
+is the fastest way to see whether YouTube's hub is actually reaching you.
+
+### The interstitial — check this before submitting
+
+On the free tier ngrok has historically shown a browser warning page
+("You are about to visit...") before the real content, for requests with a
+browser user-agent. Machine-to-machine traffic is unaffected, so the WebSub
+callback and the token exchange work either way — but **a reviewer opening your
+Terms link in a browser would see the interstitial instead of your policy.**
+
+Test it from a device that has never hit your tunnel, on cellular, in a private
+window:
+
+```
+https://yellowdonut.ngrok-free.app/legal/terms
+```
+
+If your policy renders directly, you are fine — use the tunnel URLs everywhere.
+
+If an ngrok warning page appears first, host the two legal pages elsewhere and
+keep the tunnel for the callback:
+
+```bash
+npm run cli -- legal-export ./legal-export
+```
+
+Commit those two files to a repo, enable GitHub Pages, and give TikTok the
+Pages URLs. GitHub Pages is free, permanent, has no interstitial, and does not
+depend on your laptop being awake — which is arguably where policy links
+belong anyway. The redirect URI must still point at the tunnel.
+
+---
+
+## Alternatives
+
+**Tailscale Funnel** — free, stable `https://<machine>.<tailnet>.ts.net`, no
+domain and no interstitial.
+
+```bash
 curl -fsSL https://tailscale.com/install.sh | sh
-
-# 2. log in - creates your tailnet
 sudo tailscale up
-
-# 3. find your machine's name
-tailscale status --json | grep -i dnsname
-
-# 4. expose the app's port to the public internet
 sudo tailscale funnel --bg 8787
 ```
 
-Funnel prints the public URL, of the form:
-
-```
-https://<machine>.<tailnet>.ts.net
-```
-
-That is your `PUBLIC_URL`. It survives reboots and reconnects.
+**Cloudflare Tunnel (named)** — free and on your own domain, if you have one on
+Cloudflare.
 
 ```bash
-tailscale funnel status      # confirm it is serving
-sudo tailscale funnel --https=443 off    # stop
-```
-
-Note Funnel only forwards 443/8443/10000, and your tailnet must have
-HTTPS certificates and Funnel enabled in the admin console — Tailscale prompts
-you with the exact link the first time.
-
----
-
-## Option B — Cloudflare Tunnel (if you own a domain)
-
-Free, and gives you a URL on your own domain. Requires the domain's nameservers
-to be on Cloudflare.
-
-```bash
-# install cloudflared, then:
 cloudflared tunnel login
 cloudflared tunnel create yt2tt
 cloudflared tunnel route dns yt2tt yt2tt.yourdomain.com
-```
-
-`~/.cloudflared/config.yml`:
-
-```yaml
-tunnel: yt2tt
-credentials-file: /home/you/.cloudflared/<TUNNEL-ID>.json
-
-ingress:
-  - hostname: yt2tt.yourdomain.com
-    service: http://127.0.0.1:8787
-  - service: http_status:404
-```
-
-```bash
 cloudflared tunnel run yt2tt
-# run it permanently:
-sudo cloudflared service install
 ```
 
-`PUBLIC_URL=https://yt2tt.yourdomain.com`
-
----
-
-## Option C — ngrok static domain
-
-The free tier includes one static domain, which is enough.
-
-```bash
-ngrok config add-authtoken <token>
-# claim a domain in the ngrok dashboard, then:
-ngrok http 8787 --url=your-name.ngrok-free.app
-```
-
-`PUBLIC_URL=https://your-name.ngrok-free.app`
-
----
-
-## What not to use
-
-```bash
-cloudflared tunnel --url http://localhost:8787   # random *.trycloudflare.com
-ngrok http 8787                                   # random *.ngrok-free.app
-```
-
-Both give a **new URL every restart**. Fine for a one-off test, useless here:
-the redirect URI registered with TikTok would stop matching, OAuth would fail
-with a redirect-uri mismatch, and your submitted policy links would 404 for the
-reviewer. The app warns at startup if `PUBLIC_URL` looks like one of these.
+**Not usable here:** `ngrok http 8787` without `--url`, and
+`cloudflared tunnel --url http://localhost:8787`. Both mint a new hostname per
+run. The app warns at startup if `PUBLIC_URL` looks like one.
 
 ---
 
 ## After the tunnel is up
 
 ```bash
-# 1. put the URL in .env
-PUBLIC_URL=https://<your-stable-host>
-TIKTOK_REDIRECT_URI=https://<your-stable-host>/oauth/tiktok/callback
-
-# 2. check what to paste into the TikTok portal
+# what to paste into the TikTok portal
 npm run cli -- urls
 
-# 3. confirm the world can reach the legal pages
-curl -sI https://<your-stable-host>/legal/terms | head -1   # expect 200
+# confirm the outside world can reach the legal pages
+curl -sI https://<your-host>/legal/terms | head -1        # expect 200
 
-# 4. subscribe to the YouTube feed
+# then subscribe to the YouTube feed
 npm run cli -- subscribe
 npm run cli -- status
 ```
 
-Your machine must be awake for any of this to work. On a laptop, disable sleep
-or accept that uploads published while it is closed are caught by the poller
-when it wakes rather than in real time.
+Your machine has to be awake. On a laptop, uploads published while it is asleep
+are picked up by the poller when it wakes rather than in real time.

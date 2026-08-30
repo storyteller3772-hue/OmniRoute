@@ -210,25 +210,32 @@ actual behaviour, but they are not legal advice.
 The app needs one **stable** public HTTPS origin — for the WebSub callback, the
 OAuth redirect, and the legal pages the TikTok reviewer fetches. It gets
 registered with TikTok, so a URL that changes on restart breaks OAuth and leaves
-your submitted policy links dead. The app warns at startup if `PUBLIC_URL` looks
-like a throwaway tunnel.
+your policy links dead. The app warns at startup if `PUBLIC_URL` looks like a
+throwaway tunnel.
 
-Fastest route with no VPS and no domain — Tailscale Funnel:
+With ngrok, the free static domain is the part that matters:
 
 ```bash
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up
-sudo tailscale funnel --bg 8787       # prints https://<machine>.<tailnet>.ts.net
+ngrok config add-authtoken <token>
+# claim a domain in the dashboard, then:
+ngrok http 8787 --url=your-name.ngrok-free.app
 ```
-
-Then:
 
 ```bash
 npm run cli -- urls    # exactly what to paste into the TikTok portal
 ```
 
-`deploy/tunnel.md` covers Tailscale Funnel, named Cloudflare Tunnels, and ngrok
-static domains, and explains which options are unusable here and why.
+Before submitting, open `https://your-name.ngrok-free.app/legal/terms` on
+cellular in a private window. If an ngrok interstitial appears ahead of the
+policy, host those two pages statically instead and keep the tunnel for the
+callback:
+
+```bash
+npm run cli -- legal-export ./legal-export   # then serve via GitHub Pages
+```
+
+`deploy/tunnel.md` has the full setup, plus Tailscale Funnel and Cloudflare
+Tunnel alternatives.
 
 ## Running it 24/7
 
@@ -319,6 +326,7 @@ npm run cli -- ingest dQw4w9WgXcQ --force   # queue one by hand
 npm run cli -- status
 npm run cli -- whoami            # which TikTok account posts go to
 npm run cli -- urls              # URLs to paste into the TikTok portal
+npm run cli -- legal-export      # write the legal pages as static HTML
 ```
 
 Set `DRY_RUN=true` to run the whole pipeline and stop short of uploading —
@@ -354,7 +362,7 @@ all resolve to one job.
 ## Tests
 
 ```bash
-npm test          # 217 tests, node:test
+npm test          # 218 tests, node:test
 npm run typecheck
 ```
 

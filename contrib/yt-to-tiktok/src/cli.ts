@@ -28,6 +28,7 @@ const USAGE = `yt-to-tiktok
   status                           Show subscription, token and job summary
   whoami                           Show WHICH TikTok account posts will go to
   urls                             Print the URLs to paste into the TikTok portal
+  legal-export [dir]               Write the Terms and Privacy pages as static HTML
   doctor                           Check config and external tools
 `;
 
@@ -68,6 +69,8 @@ async function main(): Promise<number> {
       return withStore(cfg, (s) => whoamiCmd(s, cfg));
     case "urls":
       return urlsCmd(cfg);
+    case "legal-export":
+      return legalExportCmd(cfg, args[0]);
     case "doctor":
       return withStore(cfg, (s) => doctorCmd(s, cfg));
     default:
@@ -355,6 +358,44 @@ async function statusCmd(store: Store, cfg: Config): Promise<number> {
   );
 
   process.stdout.write(`${out.join("\n")}\n`);
+  return 0;
+}
+
+/**
+ * Writes the legal pages out as standalone files.
+ *
+ * The app serves them itself, but some tunnels put an interstitial in front of
+ * browser traffic on their free tier - which a reviewer opening the link would
+ * hit. Exporting lets them be hosted somewhere plain and permanent (GitHub
+ * Pages, any static host) while the tunnel keeps serving the OAuth callback.
+ */
+async function legalExportCmd(cfg: Config, dir: string | undefined): Promise<number> {
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const { resolve, join } = await import("node:path");
+  const { renderTerms, renderPrivacy } = await import("./legal.js");
+
+  const out = resolve(dir ?? "./legal-export");
+  await mkdir(out, { recursive: true });
+
+  // index.html so a directory URL resolves; terms.html/privacy.html for links
+  // that read well.
+  const files: Array<[string, string]> = [
+    ["terms.html", renderTerms(cfg)],
+    ["privacy.html", renderPrivacy(cfg)],
+  ];
+  for (const [name, html] of files) {
+    await writeFile(join(out, name), html, "utf8");
+  }
+
+  process.stdout.write(
+    `Wrote ${files.length} files to ${out}\n\n` +
+      `To host on GitHub Pages:\n` +
+      `  1. Commit them to a repo under docs/ (or a gh-pages branch)\n` +
+      `  2. Settings -> Pages -> enable\n` +
+      `  3. Use the resulting URLs in the TikTok portal, e.g.\n` +
+      `     https://<user>.github.io/<repo>/terms.html\n\n` +
+      `Re-run this after changing LEGAL_* settings so the hosted copies match.\n`
+  );
   return 0;
 }
 

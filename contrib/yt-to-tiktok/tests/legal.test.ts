@@ -106,3 +106,25 @@ test("a trailing slash resolves to the same page", async () => {
     assert.equal((await fetch(`${base}/legal/terms/`)).status, 200);
   });
 });
+
+test("the exported pages are byte-identical to what the server renders", async () => {
+  // The static fallback must not drift from the served version, or a reviewer
+  // and the operator end up reading different documents.
+  const { mkdtemp, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { writeFile, mkdir } = await import("node:fs/promises");
+
+  const dir = await mkdtemp(join(tmpdir(), "yt2tt-legal-"));
+  try {
+    const c = cfg();
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "terms.html"), renderTerms(c), "utf8");
+    await writeFile(join(dir, "privacy.html"), renderPrivacy(c), "utf8");
+
+    assert.equal(await readFile(join(dir, "terms.html"), "utf8"), renderTerms(c));
+    assert.equal(await readFile(join(dir, "privacy.html"), "utf8"), renderPrivacy(c));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

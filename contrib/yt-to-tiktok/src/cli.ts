@@ -27,6 +27,7 @@ const USAGE = `yt-to-tiktok
   mark-failed <id> <reason>        Record that a handed-off job could not be published
   status                           Show subscription, token and job summary
   whoami                           Show WHICH TikTok account posts will go to
+  urls                             Print the URLs to paste into the TikTok portal
   doctor                           Check config and external tools
 `;
 
@@ -65,6 +66,8 @@ async function main(): Promise<number> {
       return withStore(cfg, (s) => statusCmd(s, cfg));
     case "whoami":
       return withStore(cfg, (s) => whoamiCmd(s, cfg));
+    case "urls":
+      return urlsCmd(cfg);
     case "doctor":
       return withStore(cfg, (s) => doctorCmd(s, cfg));
     default:
@@ -352,6 +355,53 @@ async function statusCmd(store: Store, cfg: Config): Promise<number> {
   );
 
   process.stdout.write(`${out.join("\n")}\n`);
+  return 0;
+}
+
+/**
+ * Prints the three URLs the TikTok portal asks for, with their lengths.
+ *
+ * The portal's Terms and Privacy fields are URL inputs with a 256-character
+ * limit, which is easy to misread as a limit on the documents themselves. The
+ * lengths are shown to make it obvious these are short links.
+ */
+function urlsCmd(cfg: Config): number {
+  if (!cfg.PUBLIC_URL) {
+    process.stderr.write(
+      "PUBLIC_URL is not set.\n\n" +
+        "Start a tunnel first, then put its https:// address in .env as PUBLIC_URL.\n" +
+        "See README -> \"Exposing it without a VPS\".\n"
+    );
+    return 1;
+  }
+
+  const at = (path: string) => new URL(path, cfg.PUBLIC_URL).toString();
+  const rows: Array<[string, string]> = [
+    ["Redirect URI", at("/oauth/tiktok/callback")],
+    ["Terms of Service URL", at("/legal/terms")],
+    ["Privacy Policy URL", at("/legal/privacy")],
+  ];
+
+  process.stdout.write("Paste these into the TikTok developer portal:\n\n");
+  for (const [label, url] of rows) {
+    process.stdout.write(`  ${label}\n    ${url}\n    (${url.length} characters)\n\n`);
+  }
+
+  const longest = Math.max(...rows.map(([, u]) => u.length));
+  if (longest > 256) {
+    process.stdout.write(
+      `  !!  One of these exceeds the portal's 256-character field limit.\n` +
+        `      Use a shorter hostname for PUBLIC_URL.\n\n`
+    );
+    return 1;
+  }
+
+  process.stdout.write(
+    `All well under the portal's 256-character URL limit (longest: ${longest}).\n` +
+      `That limit applies to the LINK, not to the policy text.\n\n` +
+      `The WebSub callback (${at("/websub/youtube")}) is not entered in the\n` +
+      `TikTok portal - it is registered automatically by \`cli subscribe\`.\n`
+  );
   return 0;
 }
 

@@ -205,6 +205,31 @@ actual behaviour, but they are not legal advice.
 
 `docs/tiktok-app-submission.md` has the rest of the submission copy.
 
+## Exposing it without a VPS
+
+The app needs one **stable** public HTTPS origin — for the WebSub callback, the
+OAuth redirect, and the legal pages the TikTok reviewer fetches. It gets
+registered with TikTok, so a URL that changes on restart breaks OAuth and leaves
+your submitted policy links dead. The app warns at startup if `PUBLIC_URL` looks
+like a throwaway tunnel.
+
+Fastest route with no VPS and no domain — Tailscale Funnel:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+sudo tailscale funnel --bg 8787       # prints https://<machine>.<tailnet>.ts.net
+```
+
+Then:
+
+```bash
+npm run cli -- urls    # exactly what to paste into the TikTok portal
+```
+
+`deploy/tunnel.md` covers Tailscale Funnel, named Cloudflare Tunnels, and ngrok
+static domains, and explains which options are unusable here and why.
+
 ## Running it 24/7
 
 Unattended posting needs the process to survive reboots. `deploy/` has both:
@@ -293,6 +318,7 @@ npm run cli -- reject 13
 npm run cli -- ingest dQw4w9WgXcQ --force   # queue one by hand
 npm run cli -- status
 npm run cli -- whoami            # which TikTok account posts go to
+npm run cli -- urls              # URLs to paste into the TikTok portal
 ```
 
 Set `DRY_RUN=true` to run the whole pipeline and stop short of uploading —
@@ -328,7 +354,7 @@ all resolve to one job.
 ## Tests
 
 ```bash
-npm test          # 212 tests, node:test
+npm test          # 217 tests, node:test
 npm run typecheck
 ```
 

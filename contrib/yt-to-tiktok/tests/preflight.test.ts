@@ -116,3 +116,56 @@ test("trims that swallow the clip threshold are flagged", () => {
   });
   assert.ok(warnings.some((w) => /CLIP_HEAD_TRIM_SECONDS/.test(w)));
 });
+
+// ---------------------------------------------------------------------------
+// tunnel URL stability
+// ---------------------------------------------------------------------------
+
+import { isEphemeralTunnel } from "../src/preflight.js";
+
+test("throwaway tunnel hostnames are recognised", () => {
+  for (const url of [
+    "https://shy-mountain-1234.trycloudflare.com",
+    "https://random-words-here.trycloudflare.com",
+    "https://1a2b3c4d5e6f.ngrok-free.app",
+    "https://deadbeef1234.ngrok.io",
+    "https://spotty-pug-42.loca.lt",
+  ]) {
+    assert.equal(isEphemeralTunnel(url), true, `should flag ${url}`);
+  }
+});
+
+test("stable hostnames are not flagged", () => {
+  for (const url of [
+    "https://yellowdonut.tail1234.ts.net",
+    "https://yt2tt.yourdomain.com",
+    "https://my-chosen-name.ngrok-free.app",
+    "https://example.com",
+    "http://127.0.0.1:8787",
+  ]) {
+    assert.equal(isEphemeralTunnel(url), false, `should not flag ${url}`);
+  }
+});
+
+test("a malformed PUBLIC_URL does not crash the check", () => {
+  assert.equal(isEphemeralTunnel("not a url"), false);
+  assert.equal(isEphemeralTunnel(""), false);
+});
+
+test("an ephemeral tunnel warns but does not block startup", () => {
+  const { fatal, warnings } = check({
+    TIKTOK_PUBLISH_MODE: "handoff",
+    PUBLIC_URL: "https://shy-mountain-1234.trycloudflare.com",
+  });
+  assert.deepEqual(fatal, [], "a bad URL is worth a warning, not a refusal to start");
+  assert.ok(warnings.some((w) => /throwaway tunnel/.test(w)));
+});
+
+test("a stable tunnel URL produces no tunnel warning", () => {
+  const { warnings } = check({
+    TIKTOK_PUBLISH_MODE: "handoff",
+    PUBLIC_URL: "https://yellowdonut.tail1234.ts.net",
+    WEBSUB_SECRET: "a-secret-long-enough-to-pass",
+  });
+  assert.ok(!warnings.some((w) => /throwaway tunnel/.test(w)));
+});

@@ -16,6 +16,24 @@ export interface PreflightResult {
  * in the loop to notice a job failing every retry, so the mistakes have to be
  * caught before the process starts serving.
  */
+/**
+ * Quick-tunnel hostnames are randomly regenerated per run. Named Cloudflare
+ * tunnels use the operator's own domain and are not matched here.
+ */
+export function isEphemeralTunnel(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  // e.g. shy-mountain-1234.trycloudflare.com, 1a2b3c4d.ngrok-free.app
+  if (host.endsWith(".trycloudflare.com")) return true;
+  if (/^[0-9a-f]{8,}\./.test(host) && /\.ngrok(-free)?\.(app|io|dev)$/.test(host)) return true;
+  if (/\.loca\.lt$/.test(host)) return true;
+  return false;
+}
+
 export function checkRuntimeConfig(cfg: Config): PreflightResult {
   const fatal: string[] = [];
   const warnings: string[] = [];
@@ -65,6 +83,13 @@ export function checkRuntimeConfig(cfg: Config): PreflightResult {
 
   if (!cfg.PUBLIC_URL) {
     warnings.push("PUBLIC_URL is not set: no push notifications, polling only");
+  } else if (isEphemeralTunnel(cfg.PUBLIC_URL)) {
+    // A URL that changes on restart breaks the registered redirect URI and
+    // leaves the submitted policy links dead.
+    warnings.push(
+      `PUBLIC_URL=${cfg.PUBLIC_URL} looks like a throwaway tunnel. It will change on restart, ` +
+        "breaking OAuth and your submitted policy links. Use a stable hostname - see deploy/tunnel.md"
+    );
   }
   if (!cfg.WEBSUB_SECRET && cfg.PUBLIC_URL) {
     warnings.push("WEBSUB_SECRET is not set: the callback will reject every notification");

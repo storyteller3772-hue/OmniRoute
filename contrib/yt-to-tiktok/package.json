@@ -1,0 +1,31 @@
+{
+  "name": "yt-to-tiktok",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Auto-repurpose your own YouTube uploads to your own TikTok account: WebSub trigger, FFmpeg reformat, official TikTok Content Posting API.",
+  "engines": {
+    "node": ">=22.5.0 <23 || >=24.0.0 <27"
+  },
+  "bin": {
+    "yt2tt": "./dist/cli.js"
+  },
+  "scripts": {
+    "dev": "node --import tsx/esm src/main.ts",
+    "cli": "node --import tsx/esm src/cli.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "test": "node --import tsx/esm --test tests/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "pino": "^9.5.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "pino-pretty": "^13.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

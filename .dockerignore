@@ -148,3 +148,6 @@ app.__qa_backup/
 .next-playwright/
 cloud/
 electron/dist-electron
+
+# Standalone contrib tooling - not part of the app build
+contrib

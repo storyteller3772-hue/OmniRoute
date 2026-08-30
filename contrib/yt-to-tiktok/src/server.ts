@@ -176,6 +176,45 @@ async function handle(
     return json(res, 200, store.listJobs(state || undefined, 100));
   }
 
+  if (path === "/jobs/ready" && req.method === "GET") {
+    if (!authorised(req, cfg)) return send(res, 401, "unauthorised");
+    const rows = store.listJobs("awaiting_handoff", 100).map((j) => ({
+      jobId: j.id,
+      videoId: j.video_id,
+      clipIndex: j.clip_index,
+      file: j.output_path,
+      title: j.caption ?? "",
+      sourceUrl: `https://www.youtube.com/watch?v=${j.video_id}`,
+    }));
+    return json(res, 200, rows);
+  }
+
+  const published = /^\/jobs\/(\d+)\/published$/.exec(path);
+  if (published && req.method === "POST") {
+    if (!authorised(req, cfg)) return send(res, 401, "unauthorised");
+    const id = Number(published[1]);
+    const job = store.getJob(id);
+    if (!job) return json(res, 404, { error: "no such job" });
+    if (job.state !== "awaiting_handoff") {
+      return json(res, 409, { error: `job is ${job.state}, not awaiting_handoff` });
+    }
+    const body = await readRawBody(req);
+    let postId: string | null = null;
+    try {
+      postId = (JSON.parse(body.toString("utf8") || "{}") as { postId?: string }).postId ?? null;
+    } catch {
+      /* an empty or unparseable body just means no post id was supplied */
+    }
+    store.updateJob(id, {
+      state: "published",
+      tiktok_status: "PUBLISHED_VIA_HANDOFF",
+      publish_id: postId,
+      last_error: null,
+    });
+    logger.info({ jobId: id, postId }, "job marked published via handoff");
+    return json(res, 200, { id, state: "published", postId });
+  }
+
   const action = /^\/jobs\/(\d+)\/(approve|reject)$/.exec(path);
   if (action && req.method === "POST") {
     if (!authorised(req, cfg)) return send(res, 401, "unauthorised");

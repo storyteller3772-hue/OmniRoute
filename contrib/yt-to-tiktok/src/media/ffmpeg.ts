@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
+import { parseFrameRate } from "../pipeline/handoff.js";
 import {
   buildLoudnormAnalysisFilter,
   buildLoudnormApplyFilter,
@@ -13,6 +14,7 @@ export interface ProbeResult {
   durationSec: number;
   width: number;
   height: number;
+  fps: number;
   hasAudio: boolean;
   hasVideo: boolean;
 }
@@ -98,7 +100,14 @@ export async function probe(ffprobePath: string, file: string): Promise<ProbeRes
 
   const parsed = JSON.parse(stdout) as {
     format?: { duration?: string };
-    streams?: Array<{ codec_type?: string; width?: number; height?: number; duration?: string }>;
+    streams?: Array<{
+      codec_type?: string;
+      width?: number;
+      height?: number;
+      duration?: string;
+      r_frame_rate?: string;
+      avg_frame_rate?: string;
+    }>;
   };
 
   const streams = parsed.streams ?? [];
@@ -111,9 +120,17 @@ export async function probe(ffprobePath: string, file: string): Promise<ProbeRes
     durationSec: Number.isFinite(duration) ? duration : 0,
     width: video?.width ?? 0,
     height: video?.height ?? 0,
+    // r_frame_rate is the container's nominal rate; avg_frame_rate is measured
+    // and can read 0/0 on a stream ffprobe could not sample.
+    fps: firstFinite(parseFrameRate(video?.r_frame_rate), parseFrameRate(video?.avg_frame_rate)),
     hasAudio: Boolean(audio),
     hasVideo: Boolean(video),
   };
+}
+
+function firstFinite(...values: number[]): number {
+  for (const v of values) if (Number.isFinite(v) && v > 0) return v;
+  return Number.NaN;
 }
 
 /** Parses the JSON block FFmpeg's loudnorm prints to stderr on the analysis pass. */

@@ -118,6 +118,10 @@ npm run cli -- doctor
 
 ## Publish modes
 
+`TIKTOK_PUBLISH_MODE=handoff` encodes, validates, and then **stops**, holding the
+file for an external publisher. The pipeline never contacts TikTok, so no
+developer app, client key, or audit is involved. See "Handoff mode" below.
+
 `TIKTOK_PUBLISH_MODE=inbox` (default) sends the file to your TikTok **drafts**.
 You open the app, add sounds or effects, and post. It needs only the
 `video.upload` scope and works with an unaudited app — this is the mode to start
@@ -129,6 +133,62 @@ account does not offer.
 
 `TIKTOK_PRIVACY_LEVEL` defaults to `SELF_ONLY`. Raise it once you have watched a
 few go through.
+
+## Handoff mode
+
+Use this when you do not want to register a TikTok developer app, or you want
+public posting without waiting on an app audit. The pipeline does everything up
+to a finished, validated MP4 and then hands off:
+
+```
+… → encode → preflight → REVIEW → awaiting_handoff → (external publisher) → published
+```
+
+Collect the queue:
+
+```bash
+npm run cli -- ready          # JSON: jobId, file, title, sourceUrl
+```
+
+```json
+[
+  {
+    "jobId": 4,
+    "videoId": "dQw4w9WgXcQ",
+    "clipIndex": 0,
+    "file": "/…/data/work/dQw4w9WgXcQ.0.mp4",
+    "title": "Donut Review #shorts",
+    "bytes": 18234881,
+    "sourceUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+  }
+]
+```
+
+Publish those files however you like, then report back:
+
+```bash
+npm run cli -- mark-published 4 --post-id 7412345678901234567
+npm run cli -- mark-failed 4 "rejected: frame rate"    # leaves it queued to retry
+```
+
+The same surface is available over HTTP for a non-shell publisher:
+`GET /jobs/ready` and `POST /jobs/:id/published` with `{"postId":"…"}`.
+
+**Preflight.** Because a rejected upload costs a full round trip — and TikTok
+rejects some files only *after* accepting the post — the encoded file is checked
+locally against the publisher's limits before it is ever queued:
+
+| Rule | Bound |
+| --- | --- |
+| Duration | 3–600 s |
+| Frame size | ≥ 360 px on both sides |
+| Frame rate | 23–60 fps |
+| File size | ≤ 1 GiB |
+
+A violation fails the job immediately with a message naming the setting that
+fixes it, rather than surfacing as a remote error later. Captions are also built
+to a 150-character title limit in this mode, which is tighter than a native
+TikTok caption.
 
 ## Day to day
 
@@ -175,7 +235,7 @@ all resolve to one job.
 ## Tests
 
 ```bash
-npm test          # 167 tests, node:test
+npm test          # 187 tests, node:test
 npm run typecheck
 ```
 

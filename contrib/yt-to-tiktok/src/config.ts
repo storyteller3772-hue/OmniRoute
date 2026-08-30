@@ -102,8 +102,10 @@ const schema = z.object({
    * `inbox` sends the file to your TikTok drafts for you to finish and post -
    * works with an unaudited app and the `video.upload` scope. `direct` publishes
    * straight to the profile and needs `video.publish` plus an audited app.
+   * `handoff` stops after encoding and holds the file for an external publisher
+   * (see README - "Handoff mode"); the pipeline never talks to TikTok itself.
    */
-  TIKTOK_PUBLISH_MODE: z.enum(["inbox", "direct"]).default("inbox"),
+  TIKTOK_PUBLISH_MODE: z.enum(["inbox", "direct", "handoff"]).default("inbox"),
   TIKTOK_PRIVACY_LEVEL: z
     .enum([
       "PUBLIC_TO_EVERYONE",

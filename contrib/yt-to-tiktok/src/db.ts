@@ -16,6 +16,7 @@ export type JobState =
   | "sourcing"
   | "processing"
   | "awaiting_review"
+  | "awaiting_handoff"
   | "approved"
   | "publishing"
   | "published"

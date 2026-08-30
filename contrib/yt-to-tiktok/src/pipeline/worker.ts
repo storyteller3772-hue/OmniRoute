@@ -6,6 +6,7 @@ import { logger } from "../logger.js";
 import { backoffMs, jitter, sqlTimestampIn } from "../util/time.js";
 import { measureLoudness, probe, transcode } from "../media/ffmpeg.js";
 import { resolveSource, SourceNotFoundError } from "../source/resolver.js";
+import { validateForHandoff } from "./handoff.js";
 import { TikTokApiError } from "../tiktok/api.js";
 import { getAccessToken } from "../tiktok/oauth.js";
 import {
@@ -113,6 +114,23 @@ async function stageEncode(store: Store, cfg: Config, job: JobRow): Promise<void
     loudness,
   });
 
+  // In handoff mode the file is validated against the publisher's limits now,
+  // while the cause is still local and cheap to fix, rather than after an
+  // upload that TikTok may only reject asynchronously.
+  if (cfg.TIKTOK_PUBLISH_MODE === "handoff") {
+    const encoded = await probe(cfg.FFPROBE_PATH, output);
+    const problems = validateForHandoff({
+      durationSec: encoded.durationSec,
+      width: encoded.width,
+      height: encoded.height,
+      fps: encoded.fps,
+      bytes,
+    });
+    if (problems.length) {
+      throw new TerminalJobError(`encoded file is not publishable: ${problems.join("; ")}`);
+    }
+  }
+
   const nextState = cfg.REQUIRE_REVIEW ? "awaiting_review" : "approved";
   logger.info({ jobId: job.id, output, bytes, nextState }, "encode complete");
   store.updateJob(job.id, { output_path: output, state: nextState, last_error: null });
@@ -128,6 +146,17 @@ async function stagePublish(store: Store, cfg: Config, job: JobRow): Promise<voi
       publish_id: "dry-run",
       tiktok_status: "DRY_RUN",
     });
+    return;
+  }
+
+  // Handoff mode stops here by design: an external publisher picks the file up
+  // via `cli ready` / GET /jobs/ready and reports back when it is live.
+  if (cfg.TIKTOK_PUBLISH_MODE === "handoff") {
+    logger.info(
+      { jobId: job.id, output: job.output_path },
+      "encoded and held for handoff - run `cli ready` to collect it"
+    );
+    store.updateJob(job.id, { state: "awaiting_handoff", last_error: null });
     return;
   }
 

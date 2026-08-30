@@ -4,6 +4,7 @@ import { logger } from "../logger.js";
 import { buildCaption } from "../util/caption.js";
 import { ageMinutes } from "../util/time.js";
 import { planClips } from "../media/clip.js";
+import { HANDOFF_LIMITS } from "./handoff.js";
 import { getVideoDetails, type VideoDetails } from "../youtube/api.js";
 
 export type IngestOutcome =
@@ -120,7 +121,12 @@ export async function ingestCandidate(
       {
         template: cfg.CAPTION_TEMPLATE,
         hashtags: cfg.CAPTION_HASHTAGS,
-        maxLength: cfg.CAPTION_MAX_LENGTH,
+        // The handoff publisher caps the title far below a native TikTok
+        // caption, so build to the tighter limit rather than truncating later.
+        maxLength:
+          cfg.TIKTOK_PUBLISH_MODE === "handoff"
+            ? Math.min(cfg.CAPTION_MAX_LENGTH, HANDOFF_LIMITS.maxTitleLength)
+            : cfg.CAPTION_MAX_LENGTH,
       }
     );
 

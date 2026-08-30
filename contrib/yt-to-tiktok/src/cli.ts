@@ -22,6 +22,9 @@ const USAGE = `yt-to-tiktok
   ingest <videoId> [--force]       Queue one video by hand
   jobs [state]                     List jobs
   approve <id> | reject <id>       Act on a job awaiting review
+  ready                            List encoded files waiting to be published (JSON)
+  mark-published <id> [--post-id X]  Record that a handed-off job went live
+  mark-failed <id> <reason>        Record that a handed-off job could not be published
   status                           Show subscription, token and job summary
   doctor                           Check config and external tools
 `;
@@ -51,6 +54,12 @@ async function main(): Promise<number> {
     case "approve":
     case "reject":
       return withStore(cfg, (s) => reviewCmd(s, cmd, args[0]));
+    case "ready":
+      return withStore(cfg, (s) => readyCmd(s));
+    case "mark-published":
+      return withStore(cfg, (s) => markPublishedCmd(s, args));
+    case "mark-failed":
+      return withStore(cfg, (s) => markFailedCmd(s, args));
     case "status":
       return withStore(cfg, (s) => statusCmd(s, cfg));
     case "doctor":
@@ -216,6 +225,98 @@ async function reviewCmd(store: Store, cmd: string, idArg: string | undefined): 
   store.updateJob(id, { state: cmd === "approve" ? "approved" : "rejected", next_attempt_at: null });
   process.stdout.write(`job ${id} ${cmd === "approve" ? "approved" : "rejected"}\n`);
   return 0;
+}
+
+/**
+ * Emits the handoff queue as JSON so an external publisher can consume it
+ * without scraping human-readable output.
+ */
+async function readyCmd(store: Store): Promise<number> {
+  const jobs = store.listJobs("awaiting_handoff", 100);
+  const rows = await Promise.all(
+    jobs.map(async (j) => ({
+      jobId: j.id,
+      videoId: j.video_id,
+      clipIndex: j.clip_index,
+      file: j.output_path,
+      title: j.caption ?? "",
+      bytes: j.output_path ? await sizeOf(j.output_path) : null,
+      sourceUrl: `https://www.youtube.com/watch?v=${j.video_id}`,
+    }))
+  );
+  process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+  return 0;
+}
+
+async function sizeOf(path: string): Promise<number | null> {
+  try {
+    const { stat } = await import("node:fs/promises");
+    return (await stat(path)).size;
+  } catch {
+    return null;
+  }
+}
+
+async function markPublishedCmd(store: Store, args: string[]): Promise<number> {
+  const id = Number(args.find((a) => !a.startsWith("--")));
+  const postIdx = args.indexOf("--post-id");
+  const postId = postIdx === -1 ? null : (args[postIdx + 1] ?? null);
+
+  const job = await requireHandoffJob(store, id);
+  if (!job) return 1;
+
+  store.updateJob(job.id, {
+    state: "published",
+    tiktok_status: "PUBLISHED_VIA_HANDOFF",
+    publish_id: postId,
+    last_error: null,
+  });
+
+  // The encode is disposable once it is live; the master is untouched.
+  if (job.output_path) {
+    try {
+      const { unlink } = await import("node:fs/promises");
+      await unlink(job.output_path);
+    } catch {
+      /* cleanup is best effort */
+    }
+  }
+  process.stdout.write(`job ${id} marked published${postId ? ` (post ${postId})` : ""}\n`);
+  return 0;
+}
+
+async function markFailedCmd(store: Store, args: string[]): Promise<number> {
+  const id = Number(args[0]);
+  const reason = args.slice(1).join(" ").trim();
+  if (!reason) {
+    process.stderr.write("usage: mark-failed <id> <reason>\n");
+    return 1;
+  }
+  const job = await requireHandoffJob(store, id);
+  if (!job) return 1;
+
+  // Left in awaiting_handoff so it can be retried after the cause is fixed;
+  // the reason is recorded for whoever looks next.
+  store.updateJob(job.id, { last_error: reason });
+  process.stdout.write(`job ${id} flagged: ${reason}\n`);
+  return 0;
+}
+
+async function requireHandoffJob(store: Store, id: number) {
+  if (!Number.isInteger(id)) {
+    process.stderr.write("a numeric job id is required\n");
+    return null;
+  }
+  const job = store.getJob(id);
+  if (!job) {
+    process.stderr.write(`no job ${id}\n`);
+    return null;
+  }
+  if (job.state !== "awaiting_handoff") {
+    process.stderr.write(`job ${id} is ${job.state}, not awaiting_handoff\n`);
+    return null;
+  }
+  return job;
 }
 
 async function statusCmd(store: Store, cfg: Config): Promise<number> {

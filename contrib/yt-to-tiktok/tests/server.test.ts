@@ -246,3 +246,111 @@ test("unknown routes are 404", async () => {
     assert.equal((await fetch(`${base}/admin`)).status, 404);
   });
 });
+
+// ---------------------------------------------------------------------------
+// handoff surface
+// ---------------------------------------------------------------------------
+
+function seedHandoffJob(store: Store, caption = "Donut Review"): number {
+  store.insertVideoIfNew({
+    videoId: VIDEO,
+    channelId: CHANNEL,
+    title: "Donut Review",
+    publishedAt: new Date().toISOString(),
+  });
+  const id = store.createJob(VIDEO, 0);
+  store.updateJob(id, {
+    state: "awaiting_handoff",
+    output_path: "/work/dQw4w9WgXcQ.0.mp4",
+    caption,
+  });
+  return id;
+}
+
+test("the ready queue lists only jobs awaiting handoff, with what a publisher needs", async () => {
+  await withServer({ TIKTOK_PUBLISH_MODE: "handoff" }, async ({ base, store }) => {
+    const id = seedHandoffJob(store);
+    // A job in another state must not appear.
+    const other = store.createJob(VIDEO, 1);
+    store.updateJob(other, { state: "awaiting_review" });
+
+    const res = await fetch(`${base}/jobs/ready`);
+    assert.equal(res.status, 200);
+    const rows = (await res.json()) as Array<Record<string, unknown>>;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]!.jobId, id);
+    assert.equal(rows[0]!.file, "/work/dQw4w9WgXcQ.0.mp4");
+    assert.equal(rows[0]!.title, "Donut Review");
+    assert.equal(rows[0]!.sourceUrl, `https://www.youtube.com/watch?v=${VIDEO}`);
+  });
+});
+
+test("the ready queue is empty when nothing is held", async () => {
+  await withServer({ TIKTOK_PUBLISH_MODE: "handoff" }, async ({ base }) => {
+    assert.deepEqual(await (await fetch(`${base}/jobs/ready`)).json(), []);
+  });
+});
+
+test("reporting a job published records the post id and closes it out", async () => {
+  await withServer({ TIKTOK_PUBLISH_MODE: "handoff" }, async ({ base, store }) => {
+    const id = seedHandoffJob(store);
+    const res = await fetch(`${base}/jobs/${id}/published`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ postId: "7412345678901234567" }),
+    });
+    assert.equal(res.status, 200);
+
+    const job = store.getJob(id)!;
+    assert.equal(job.state, "published");
+    assert.equal(job.publish_id, "7412345678901234567");
+    assert.equal(job.tiktok_status, "PUBLISHED_VIA_HANDOFF");
+    assert.equal(store.claimableJobs().length, 0, "a published job must leave the queue");
+  });
+});
+
+test("a published report with no body still closes the job", async () => {
+  await withServer({ TIKTOK_PUBLISH_MODE: "handoff" }, async ({ base, store }) => {
+    const id = seedHandoffJob(store);
+    const res = await fetch(`${base}/jobs/${id}/published`, { method: "POST" });
+    assert.equal(res.status, 200);
+    assert.equal(store.getJob(id)?.state, "published");
+  });
+});
+
+test("only a job awaiting handoff can be reported published", async () => {
+  await withServer({ TIKTOK_PUBLISH_MODE: "handoff" }, async ({ base, store }) => {
+    store.insertVideoIfNew({
+      videoId: VIDEO,
+      channelId: CHANNEL,
+      title: "t",
+      publishedAt: new Date().toISOString(),
+    });
+    const id = store.createJob(VIDEO, 0);
+    const res = await fetch(`${base}/jobs/${id}/published`, { method: "POST" });
+    assert.equal(res.status, 409);
+    assert.equal(store.getJob(id)?.state, "pending");
+  });
+});
+
+test("the handoff endpoints honour the review token", async () => {
+  await withServer(
+    { TIKTOK_PUBLISH_MODE: "handoff", REVIEW_TOKEN: "a-long-enough-review-token" },
+    async ({ base, store }) => {
+      const id = seedHandoffJob(store);
+      assert.equal((await fetch(`${base}/jobs/ready`)).status, 401);
+      assert.equal(
+        (await fetch(`${base}/jobs/${id}/published`, { method: "POST" })).status,
+        401
+      );
+      assert.equal(store.getJob(id)?.state, "awaiting_handoff", "an unauthorised call changes nothing");
+    }
+  );
+});
+
+test("a job held for handoff is not picked up by the worker queue", async () => {
+  await withServer({ TIKTOK_PUBLISH_MODE: "handoff" }, async ({ store }) => {
+    seedHandoffJob(store);
+    assert.deepEqual(store.claimableJobs(), []);
+  });
+});

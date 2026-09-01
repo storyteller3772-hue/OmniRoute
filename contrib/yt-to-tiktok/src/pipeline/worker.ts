@@ -139,6 +139,19 @@ async function stageEncode(store: Store, cfg: Config, job: JobRow): Promise<void
 async function stagePublish(store: Store, cfg: Config, job: JobRow): Promise<void> {
   if (!job.output_path) throw new TerminalJobError("job reached publish with no encoded file");
 
+  // Checked BEFORE DRY_RUN: handing off is not an outbound action, so there is
+  // nothing for a dry run to suppress. Letting DRY_RUN win here would mark the
+  // job published, leave the handoff queue permanently empty, and report
+  // success for work that was never handed to anyone.
+  if (cfg.TIKTOK_PUBLISH_MODE === "handoff") {
+    logger.info(
+      { jobId: job.id, output: job.output_path },
+      "encoded and held for handoff - run `cli ready` to collect it"
+    );
+    store.updateJob(job.id, { state: "awaiting_handoff", last_error: null });
+    return;
+  }
+
   if (cfg.DRY_RUN) {
     logger.warn({ jobId: job.id }, "DRY_RUN: skipping upload to TikTok");
     store.updateJob(job.id, {
@@ -146,17 +159,6 @@ async function stagePublish(store: Store, cfg: Config, job: JobRow): Promise<voi
       publish_id: "dry-run",
       tiktok_status: "DRY_RUN",
     });
-    return;
-  }
-
-  // Handoff mode stops here by design: an external publisher picks the file up
-  // via `cli ready` / GET /jobs/ready and reports back when it is live.
-  if (cfg.TIKTOK_PUBLISH_MODE === "handoff") {
-    logger.info(
-      { jobId: job.id, output: job.output_path },
-      "encoded and held for handoff - run `cli ready` to collect it"
-    );
-    store.updateJob(job.id, { state: "awaiting_handoff", last_error: null });
     return;
   }
 

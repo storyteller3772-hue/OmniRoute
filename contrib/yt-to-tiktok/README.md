@@ -386,11 +386,17 @@ all resolve to one job.
 ## Tests
 
 ```bash
-npm test          # 218 tests, node:test
+npm test          # 230 tests, node:test
 npm run typecheck
 ```
 
-Covers the parts where a subtle mistake is expensive: TikTok's chunk arithmetic,
+`tests/e2e-pipeline.test.ts` runs the real thing: FFmpeg generates a test
+master, the actual job state machine drives it through sourcing, encoding,
+preflight and the review gate, and the output is probed to confirm it really is
+1080x1920 with audio intact. Only the upload itself is stubbed (`DRY_RUN`),
+since that needs live credentials. It skips itself when FFmpeg is absent.
+
+The rest covers the parts where a subtle mistake is expensive: TikTok's chunk arithmetic,
 WebSub signature verification, feed parsing against malformed input, caption
 truncation across code points, FFmpeg argument construction, path-traversal
 guards on the source resolver, and the HTTP surface.

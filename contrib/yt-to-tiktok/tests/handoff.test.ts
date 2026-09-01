@@ -126,3 +126,70 @@ test("handoff is a valid publish mode and the default is unchanged", () => {
   );
   assert.equal(loadConfig({} as NodeJS.ProcessEnv).TIKTOK_PUBLISH_MODE, "inbox");
 });
+
+test("handoff takes precedence over DRY_RUN, so the queue still fills", async () => {
+  // Regression: DRY_RUN used to short-circuit first, marking handoff jobs
+  // published and leaving `cli ready` permanently empty.
+  const { Store: S } = await import("../src/db.js");
+  const { tick } = await import("../src/pipeline/worker.js");
+
+  const store = new S(":memory:");
+  try {
+    const conf = loadConfig({
+      TIKTOK_PUBLISH_MODE: "handoff",
+      DRY_RUN: "true",
+      REQUIRE_REVIEW: "false",
+      CAPTION_HASHTAGS: "",
+    } as NodeJS.ProcessEnv);
+
+    store.insertVideoIfNew({
+      videoId: "dQw4w9WgXcQ",
+      channelId: "UCabcdefghijklmnopqrstuv",
+      title: "t",
+      publishedAt: new Date().toISOString(),
+    });
+    const id = store.createJob("dQw4w9WgXcQ", 0);
+    // Jump straight to the publish stage with an encoded file already recorded.
+    store.updateJob(id, { state: "approved", output_path: "/work/fake.mp4" });
+
+    await tick(store, conf);
+
+    const job = store.getJob(id)!;
+    assert.equal(job.state, "awaiting_handoff", "handoff must hold even under DRY_RUN");
+    assert.notEqual(job.tiktok_status, "DRY_RUN");
+  } finally {
+    store.close();
+  }
+});
+
+test("DRY_RUN still short-circuits the API publish modes", async () => {
+  const { Store: S } = await import("../src/db.js");
+  const { tick } = await import("../src/pipeline/worker.js");
+
+  const store = new S(":memory:");
+  try {
+    const conf = loadConfig({
+      TIKTOK_PUBLISH_MODE: "inbox",
+      DRY_RUN: "true",
+      REQUIRE_REVIEW: "false",
+      CAPTION_HASHTAGS: "",
+    } as NodeJS.ProcessEnv);
+
+    store.insertVideoIfNew({
+      videoId: "dQw4w9WgXcQ",
+      channelId: "UCabcdefghijklmnopqrstuv",
+      title: "t",
+      publishedAt: new Date().toISOString(),
+    });
+    const id = store.createJob("dQw4w9WgXcQ", 0);
+    store.updateJob(id, { state: "approved", output_path: "/work/fake.mp4" });
+
+    await tick(store, conf);
+
+    const job = store.getJob(id)!;
+    assert.equal(job.state, "published");
+    assert.equal(job.tiktok_status, "DRY_RUN");
+  } finally {
+    store.close();
+  }
+});

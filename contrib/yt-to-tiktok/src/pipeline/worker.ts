@@ -4,7 +4,9 @@ import type { Config } from "../config.js";
 import type { JobRow, Store } from "../db.js";
 import { logger } from "../logger.js";
 import { backoffMs, jitter, sqlTimestampIn } from "../util/time.js";
-import { measureLoudness, probe, transcode } from "../media/ffmpeg.js";
+import { buildTranscodeArgs, measureLoudness, probe, run, transcode } from "../media/ffmpeg.js";
+import { buildAudioOnlyArgs, buildCopyArgs, decideEncodePlan } from "../media/plan.js";
+import { buildLoudnormApplyFilter } from "../media/filters.js";
 import { resolveSource, SourceNotFoundError } from "../source/resolver.js";
 import { validateForHandoff } from "./handoff.js";
 import { TikTokApiError } from "../tiktok/api.js";
@@ -75,44 +77,80 @@ async function stageEncode(store: Store, cfg: Config, job: JobRow): Promise<void
 
   const output = join(resolve(cfg.WORK_DIR), `${job.video_id}.${job.clip_index}.mp4`);
 
-  const loudness =
-    cfg.LOUDNESS_ENABLED && info.hasAudio
-      ? {
-          targets: {
-            i: cfg.LOUDNESS_TARGET_I,
-            tp: cfg.LOUDNESS_TARGET_TP,
-            lra: cfg.LOUDNESS_TARGET_LRA,
-          },
-          measured: await measureLoudness(
-            cfg.FFMPEG_PATH,
-            job.source_path,
-            {
-              i: cfg.LOUDNESS_TARGET_I,
-              tp: cfg.LOUDNESS_TARGET_TP,
-              lra: cfg.LOUDNESS_TARGET_LRA,
-            },
-            clip
-          ),
-        }
-      : null;
+  const targets = {
+    i: cfg.LOUDNESS_TARGET_I,
+    tp: cfg.LOUDNESS_TARGET_TP,
+    lra: cfg.LOUDNESS_TARGET_LRA,
+  };
 
-  logger.info({ jobId: job.id, clip: clip ?? "full" }, "encoding vertical cut");
+  // Decide the cheapest correct path before doing any work.
+  const plan = decideEncodePlan(
+    {
+      width: info.width,
+      height: info.height,
+      fps: info.fps,
+      hasAudio: info.hasAudio,
+      videoCodec: info.videoCodec,
+      audioCodec: info.audioCodec,
+    },
+    {
+      width: cfg.OUTPUT_WIDTH,
+      height: cfg.OUTPUT_HEIGHT,
+      verticalMode: cfg.VERTICAL_MODE,
+      autoReframeMode: cfg.AUTO_REFRAME_MODE,
+      loudnessEnabled: cfg.LOUDNESS_ENABLED,
+      clip,
+    }
+  );
 
-  const { bytes } = await transcode(cfg.FFMPEG_PATH, {
-    input: job.source_path,
-    output,
-    mode: cfg.VERTICAL_MODE,
-    width: cfg.OUTPUT_WIDTH,
-    height: cfg.OUTPUT_HEIGHT,
-    fps: cfg.OUTPUT_FPS,
-    crf: cfg.VIDEO_CRF,
-    preset: cfg.VIDEO_PRESET,
-    audioBitrate: cfg.AUDIO_BITRATE,
-    padColor: cfg.PAD_COLOR,
-    hasAudio: info.hasAudio,
-    clip,
-    loudness,
-  });
+  logger.info(
+    { jobId: job.id, plan: plan.kind, reason: plan.reason, clip: clip ?? "full" },
+    plan.kind === "copy"
+      ? "source already publishable - remuxing without re-encoding"
+      : plan.kind === "audio-only"
+        ? "keeping video stream, re-encoding audio only"
+        : "encoding vertical cut"
+  );
+
+  if (plan.kind === "copy") {
+    await run(cfg.FFMPEG_PATH, buildCopyArgs(job.source_path, output), { timeoutMs: 3_600_000 });
+  } else if (plan.kind === "audio-only") {
+    const measured = await measureLoudness(cfg.FFMPEG_PATH, job.source_path, targets, clip);
+    await run(
+      cfg.FFMPEG_PATH,
+      buildAudioOnlyArgs(job.source_path, output, {
+        audioFilter: cfg.LOUDNESS_ENABLED ? buildLoudnormApplyFilter(targets, measured) : undefined,
+        audioBitrate: cfg.AUDIO_BITRATE,
+      }),
+      { timeoutMs: 3_600_000 }
+    );
+  } else {
+    const loudness =
+      cfg.LOUDNESS_ENABLED && info.hasAudio
+        ? {
+            targets,
+            measured: await measureLoudness(cfg.FFMPEG_PATH, job.source_path, targets, clip),
+          }
+        : null;
+
+    await transcode(cfg.FFMPEG_PATH, {
+      input: job.source_path,
+      output,
+      mode: plan.mode,
+      width: cfg.OUTPUT_WIDTH,
+      height: cfg.OUTPUT_HEIGHT,
+      fps: cfg.OUTPUT_FPS,
+      crf: cfg.VIDEO_CRF,
+      preset: cfg.VIDEO_PRESET,
+      audioBitrate: cfg.AUDIO_BITRATE,
+      padColor: cfg.PAD_COLOR,
+      hasAudio: info.hasAudio,
+      clip,
+      loudness,
+    });
+  }
+
+  const { size: bytes } = await stat(output);
 
   // In handoff mode the file is validated against the publisher's limits now,
   // while the cause is still local and cheap to fix, rather than after an

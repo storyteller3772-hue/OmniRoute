@@ -361,15 +361,36 @@ Set `REVIEW_TOKEN` if the server is reachable from anywhere but localhost.
 
 | Setting | Effect |
 | --- | --- |
-| `VERTICAL_MODE=blur` | Whole frame visible over a blurred fill. Safest for talking-head and wide shots. |
-| `VERTICAL_MODE=crop` | Fills the frame, loses the sides. Good when the subject is centred. |
-| `VERTICAL_MODE=pad` | Letterbox onto `PAD_COLOR`. |
+| `VERTICAL_MODE=auto` | **Default.** Reframes only when the source is not already vertical. |
+| `VERTICAL_MODE=none` | Never reframe, whatever the source shape. |
+| `VERTICAL_MODE=blur` | Always fit the whole frame over a blurred fill. Safest for wide shots. |
+| `VERTICAL_MODE=crop` | Always fill and centre-crop, losing the sides. |
+| `VERTICAL_MODE=pad` | Always letterbox onto `PAD_COLOR`. |
+| `AUTO_REFRAME_MODE` | Which strategy `auto` uses when a reframe *is* needed. |
 | `CLIP_THRESHOLD_SECONDS` | Videos longer than this get segmented. |
 | `CLIP_TARGET_SECONDS` / `CLIP_MAX_COUNT` | Length and number of segments. |
 | `CLIP_HEAD_TRIM_SECONDS` | Skip your intro when segmenting. |
 
 Clip selection is a plain time-slicer — predictable and free. `planClips()` in
 `src/media/clip.ts` is the seam to replace with a transcript-driven picker.
+
+### If you already shoot vertical
+
+`auto` (the default) does not touch footage that is already publishable. The
+encoder picks the cheapest correct path per job:
+
+| Source | What runs |
+| --- | --- |
+| 9:16, H.264/AAC, 23–60 fps | **Stream copy.** Remux only — bytes preserved, no quality loss. |
+| 9:16, but loudness enabled or non-AAC audio | Video stream copied untouched; audio alone re-encoded. |
+| 16:9, or HEVC/VP9, or fps out of range, or a clip | Full re-encode through the framing graph. |
+
+Measured on a 6-second 1080x1920 clip: forcing `blur` took 16.3 s and grew the
+file from 155 KB to 229 KB. Under `auto` the same clip is byte-identical and
+the remux is sub-second. Clipping still re-encodes — a stream copy can only cut
+on keyframes, which would miss the intended frame.
+
+Set `VERTICAL_MODE=blur` if you want the framing applied regardless.
 
 ## How failures behave
 
@@ -386,7 +407,7 @@ all resolve to one job.
 ## Tests
 
 ```bash
-npm test          # 230 tests, node:test
+npm test          # 253 tests, node:test
 npm run typecheck
 ```
 

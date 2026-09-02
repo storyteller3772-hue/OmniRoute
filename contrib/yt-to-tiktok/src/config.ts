@@ -71,7 +71,14 @@ const schema = z.object({
   // ---- media ----
   FFMPEG_PATH: z.string().default("ffmpeg"),
   FFPROBE_PATH: z.string().default("ffprobe"),
-  VERTICAL_MODE: z.enum(["blur", "crop", "pad"]).default("blur"),
+  /**
+   * "auto" reframes only when the source aspect differs from the output -
+   * already-vertical footage is passed through untouched. "none" never
+   * reframes. blur/crop/pad always reframe.
+   */
+  VERTICAL_MODE: z.enum(["auto", "none", "blur", "crop", "pad"]).default("auto"),
+  /** Strategy "auto" uses when it decides a reframe IS needed. */
+  AUTO_REFRAME_MODE: z.enum(["blur", "crop", "pad"]).default("blur"),
   OUTPUT_WIDTH: z.coerce.number().int().default(1080),
   OUTPUT_HEIGHT: z.coerce.number().int().default(1920),
   OUTPUT_FPS: z.coerce.number().int().min(1).max(60).default(30),

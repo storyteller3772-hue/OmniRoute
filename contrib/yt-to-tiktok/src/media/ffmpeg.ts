@@ -17,6 +17,9 @@ export interface ProbeResult {
   fps: number;
   hasAudio: boolean;
   hasVideo: boolean;
+  /** Codec names as ffprobe reports them, e.g. "h264", "aac". */
+  videoCodec: string;
+  audioCodec: string;
 }
 
 export class FfmpegError extends Error {
@@ -107,6 +110,7 @@ export async function probe(ffprobePath: string, file: string): Promise<ProbeRes
       duration?: string;
       r_frame_rate?: string;
       avg_frame_rate?: string;
+      codec_name?: string;
     }>;
   };
 
@@ -125,6 +129,8 @@ export async function probe(ffprobePath: string, file: string): Promise<ProbeRes
     fps: firstFinite(parseFrameRate(video?.r_frame_rate), parseFrameRate(video?.avg_frame_rate)),
     hasAudio: Boolean(audio),
     hasVideo: Boolean(video),
+    videoCodec: video?.codec_name ?? "",
+    audioCodec: audio?.codec_name ?? "",
   };
 }
 

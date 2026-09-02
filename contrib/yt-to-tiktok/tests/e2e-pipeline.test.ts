@@ -313,3 +313,126 @@ test("handoff preflight rejects an encode that is too short to publish", maybe, 
     }
   );
 });
+
+// ---------------------------------------------------------------------------
+// already-vertical sources
+// ---------------------------------------------------------------------------
+
+/** A real 9:16 master, the shape a phone-shot or Shorts-native upload has. */
+async function makeVerticalMaster(path: string, seconds: number, silent = false): Promise<void> {
+  await makeMaster(path, seconds, { width: 1080, height: 1920, silent });
+}
+
+test("a 9:16 source is passed through without re-encoding", maybe, async () => {
+  await withPipeline({ VERTICAL_MODE: "auto", LOUDNESS_ENABLED: "false" }, async ({ dir, store, cfg }) => {
+    const { mkdir, stat } = await import("node:fs/promises");
+    await mkdir(join(dir, "masters"), { recursive: true });
+    const master = join(dir, "masters", `${VIDEO}.mp4`);
+    await makeVerticalMaster(master, 5);
+
+    seed(store, 5);
+    const id = store.createJob(VIDEO, 0);
+    await tick(store, cfg);
+    await tick(store, cfg);
+
+    const job = store.getJob(id)!;
+    assert.ok(job.output_path, `no output: ${job.last_error ?? ""}`);
+
+    const src = await probe(cfg.FFPROBE_PATH, master);
+    const out = await probe(cfg.FFPROBE_PATH, job.output_path);
+    assert.equal(out.width, 1080);
+    assert.equal(out.height, 1920);
+    assert.ok(out.hasAudio);
+
+    // A remux preserves the encoded video stream, so the sizes track closely.
+    // A re-encode of this synthetic source inflates it noticeably.
+    const srcSize = (await stat(master)).size;
+    const outSize = (await stat(job.output_path)).size;
+    assert.ok(
+      Math.abs(outSize - srcSize) / srcSize < 0.15,
+      `expected a remux (src ${srcSize}, out ${outSize}) - looks like a re-encode`
+    );
+    assert.ok(Math.abs(out.durationSec - src.durationSec) < 0.5);
+  });
+});
+
+test("the passthrough is materially faster than a forced re-encode", maybe, async () => {
+  await withPipeline({ VERTICAL_MODE: "auto", LOUDNESS_ENABLED: "false" }, async ({ dir, store, cfg }) => {
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(dir, "masters"), { recursive: true });
+    await makeVerticalMaster(join(dir, "masters", `${VIDEO}.mp4`), 6);
+
+    seed(store, 6);
+    const id = store.createJob(VIDEO, 0);
+    await tick(store, cfg);
+
+    const t0 = Date.now();
+    await tick(store, cfg);
+    const copyMs = Date.now() - t0;
+
+    assert.ok(store.getJob(id)!.output_path, "copy path produced nothing");
+    // The forced re-encode of this clip measured ~16s; a remux is sub-second.
+    assert.ok(copyMs < 5000, `remux took ${copyMs}ms, which suggests it re-encoded`);
+  });
+});
+
+test("forcing a framing mode still re-encodes a vertical source", maybe, async () => {
+  await withPipeline({ VERTICAL_MODE: "blur", LOUDNESS_ENABLED: "false" }, async ({ dir, store, cfg }) => {
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(dir, "masters"), { recursive: true });
+    await makeVerticalMaster(join(dir, "masters", `${VIDEO}.mp4`), 3);
+
+    seed(store, 3);
+    const id = store.createJob(VIDEO, 0);
+    await tick(store, cfg);
+    await tick(store, cfg);
+
+    const job = store.getJob(id)!;
+    assert.ok(job.output_path, `explicit blur failed: ${job.last_error ?? ""}`);
+    const out = await probe(cfg.FFPROBE_PATH, job.output_path);
+    assert.equal(out.width, 1080);
+    assert.equal(out.height, 1920);
+  });
+});
+
+test("a vertical source with loudness on keeps its video stream and re-encodes audio", maybe, async () => {
+  await withPipeline({ VERTICAL_MODE: "auto", LOUDNESS_ENABLED: "true" }, async ({ dir, store, cfg }) => {
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(dir, "masters"), { recursive: true });
+    await makeVerticalMaster(join(dir, "masters", `${VIDEO}.mp4`), 4);
+
+    seed(store, 4);
+    const id = store.createJob(VIDEO, 0);
+    await tick(store, cfg);
+    await tick(store, cfg);
+
+    const job = store.getJob(id)!;
+    assert.ok(job.output_path, `audio-only path failed: ${job.last_error ?? ""}`);
+    const out = await probe(cfg.FFPROBE_PATH, job.output_path);
+    assert.equal(out.width, 1080);
+    assert.equal(out.height, 1920);
+    assert.ok(out.hasAudio, "audio must survive");
+  });
+});
+
+test("clipping a vertical source still re-encodes, for frame-accurate cuts", maybe, async () => {
+  await withPipeline(
+    { VERTICAL_MODE: "auto", LOUDNESS_ENABLED: "false", CLIP_THRESHOLD_SECONDS: "5" },
+    async ({ dir, store, cfg }) => {
+      const { mkdir } = await import("node:fs/promises");
+      await mkdir(join(dir, "masters"), { recursive: true });
+      await makeVerticalMaster(join(dir, "masters", `${VIDEO}.mp4`), 12);
+
+      seed(store, 12);
+      const id = store.createJob(VIDEO, 0, { start: 4, duration: 4 });
+      await tick(store, cfg);
+      await tick(store, cfg);
+
+      const job = store.getJob(id)!;
+      assert.ok(job.output_path, `clip failed: ${job.last_error ?? ""}`);
+      const out = await probe(cfg.FFPROBE_PATH, job.output_path);
+      assert.ok(Math.abs(out.durationSec - 4) < 1, `clip duration was ${out.durationSec}`);
+      assert.equal(out.width, 1080);
+    }
+  );
+});

@@ -11,6 +11,9 @@ OmniRoute; it lives here only for convenience.
 
 ---
 
+> **Continuing this work elsewhere?** Read [`HANDOFF.md`](HANDOFF.md) first —
+> current state, what is left, and the decisions still open.
+
 ## Scope
 
 This tool is built for a creator repurposing content they own. Two consequences

@@ -11,7 +11,7 @@ const USAGE = `yt-to-tiktok
   resolve-channel <@handle|UC...>  Look up the channel id and uploads playlist
   subscribe                        Ask the WebSub hub to start pushing uploads
   unsubscribe                      Cancel the push subscription
-  set-tiktok-app                   Store the TikTok client key and secret in .env
+  set-tiktok-app                   Store the TikTok app credentials + redirect URI in .env
   tiktok-login                     Print the TikTok authorisation URL
   ingest <videoId> [--force]       Queue one video by hand (needs a YouTube API key)
   add <file>                       Queue a local master file directly (no YouTube needed)
@@ -170,20 +170,63 @@ async function setTikTokAppCmd(): Promise<number> {
     return 1;
   }
 
+  // Asked for here too, so the value registered in the portal and the value the
+  // token exchange sends come from one place. A mismatch between them is the
+  // most common authorisation failure, and it fails with a generic error.
+  const port = process.env.PORT ?? "8787";
+  const suggested = `http://localhost:${port}/oauth/tiktok/callback`;
+  const answer = (
+    await ask(`  Redirect URI [${suggested}]: `)
+  ).trim();
+  const redirectUri = answer || suggested;
+
+  try {
+    const parsed = new URL(redirectUri);
+    if (!parsed.pathname.endsWith("/oauth/tiktok/callback")) {
+      process.stderr.write(
+        `\nThat path is not the one this app serves.\n` +
+          `Expected it to end with /oauth/tiktok/callback\n`
+      );
+      return 1;
+    }
+  } catch {
+    process.stderr.write(`\n${redirectUri} is not a valid URL\n`);
+    return 1;
+  }
+
   const envPath = resolve(".env");
   await updateEnvFile(envPath, {
     TIKTOK_CLIENT_KEY: clientKey,
     TIKTOK_CLIENT_SECRET: clientSecret,
+    TIKTOK_REDIRECT_URI: redirectUri,
   });
 
-  // Confirm by length only; neither value is echoed back.
+  // Confirm by length only; neither secret is echoed back.
   process.stdout.write(
     `\nWritten to ${envPath} (mode 600, previous copy at .env.bak)\n` +
       `  client key:    ${clientKey.length} characters\n` +
-      `  client secret: ${clientSecret.length} characters\n\n` +
+      `  client secret: ${clientSecret.length} characters\n` +
+      `  redirect URI:  ${redirectUri}\n\n` +
+      `Paste that redirect URI into the portal EXACTLY, under Login Kit ->\n` +
+      `Redirect URI. A mismatch fails authorisation with a generic error.\n\n` +
       `Next:\n  node dist/cli.js tiktok-login\n  node dist/cli.js whoami\n`
   );
   return 0;
+}
+
+/** Plain visible prompt, for values that are not secret. */
+function ask(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    process.stdout.write(question);
+    process.stdin.resume();
+    process.stdin.setEncoding("utf8");
+    const onData = (chunk: string): void => {
+      process.stdin.off("data", onData);
+      process.stdin.pause();
+      resolve(chunk);
+    };
+    process.stdin.on("data", onData);
+  });
 }
 
 async function tiktokLoginCmd(store: Store, cfg: Config): Promise<number> {

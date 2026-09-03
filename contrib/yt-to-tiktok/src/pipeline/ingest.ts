@@ -6,6 +6,8 @@ import { ageMinutes } from "../util/time.js";
 import { planClips } from "../media/clip.js";
 import { HANDOFF_LIMITS } from "./handoff.js";
 import { getVideoDetails, type VideoDetails } from "../youtube/api.js";
+import { probe } from "../media/ffmpeg.js";
+import type { WatchedFile } from "../source/watcher.js";
 
 export type IngestOutcome =
   | { accepted: true; videoId: string; jobIds: number[] }
@@ -146,5 +148,88 @@ export async function ingestCandidate(
 
   store.updateVideoMetadata(videoId, { state: "queued" });
   logger.info({ videoId, title, jobs: jobIds.length }, "queued upload for repurposing");
+  return { accepted: true, videoId, jobIds };
+}
+
+
+/**
+ * Queues a master file directly, without involving YouTube at all.
+ *
+ * Duration comes from the file itself rather than the Data API, which is what
+ * lets clip planning work with no API key. The file is already in hand, so the
+ * jobs skip the sourcing stage entirely.
+ */
+export async function ingestLocalFile(
+  store: Store,
+  cfg: Config,
+  file: WatchedFile
+): Promise<IngestOutcome> {
+  const { videoId } = file;
+
+  const isNew = store.insertVideoIfNew({
+    videoId,
+    channelId: cfg.YOUTUBE_CHANNEL_ID ?? "local",
+    title: file.title,
+    publishedAt: new Date().toISOString(),
+    privacyStatus: "local",
+  });
+  if (!isNew) return { accepted: false, videoId, reason: "already seen" };
+
+  let durationSec: number | null = null;
+  try {
+    durationSec = (await probe(cfg.FFPROBE_PATH, file.path)).durationSec || null;
+  } catch (err) {
+    // Without a duration we cannot segment, but we can still post it whole.
+    logger.warn(
+      { file: file.path, err: (err as Error).message },
+      "could not read duration; posting the file whole"
+    );
+  }
+  store.updateVideoMetadata(videoId, { durationSec });
+
+  const clips = durationSec
+    ? planClips({
+        durationSec,
+        thresholdSec: cfg.CLIP_THRESHOLD_SECONDS,
+        targetSec: cfg.CLIP_TARGET_SECONDS,
+        maxCount: cfg.CLIP_MAX_COUNT,
+        headTrimSec: cfg.CLIP_HEAD_TRIM_SECONDS,
+        tailTrimSec: cfg.CLIP_TAIL_TRIM_SECONDS,
+      })
+    : [{ index: 0, startSec: 0, durationSec: 0 }];
+
+  const jobIds: number[] = [];
+  for (const clip of clips) {
+    const caption = buildCaption(
+      { title: file.title, videoId, clipIndex: clip.index, clipCount: clips.length },
+      {
+        template: cfg.CAPTION_TEMPLATE,
+        hashtags: cfg.CAPTION_HASHTAGS,
+        maxLength:
+          cfg.TIKTOK_PUBLISH_MODE === "handoff"
+            ? Math.min(cfg.CAPTION_MAX_LENGTH, HANDOFF_LIMITS.maxTitleLength)
+            : cfg.CAPTION_MAX_LENGTH,
+      }
+    );
+
+    const id = store.createJob(
+      videoId,
+      clip.index,
+      clip.durationSec > 0 && clips.length > 1
+        ? { start: clip.startSec, duration: clip.durationSec }
+        : undefined
+    );
+    if (id > 0) {
+      // The file is already here, so skip sourcing and go straight to encoding.
+      store.updateJob(id, { caption, source_path: file.path, state: "processing" });
+      jobIds.push(id);
+    }
+  }
+
+  store.updateVideoMetadata(videoId, { state: "queued" });
+  logger.info(
+    { videoId, file: file.path, title: file.title, jobs: jobIds.length },
+    "queued local master for publishing"
+  );
   return { accepted: true, videoId, jobIds };
 }

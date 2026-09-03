@@ -12,7 +12,8 @@ const USAGE = `yt-to-tiktok
   subscribe                        Ask the WebSub hub to start pushing uploads
   unsubscribe                      Cancel the push subscription
   tiktok-login                     Print the TikTok authorisation URL
-  ingest <videoId> [--force]       Queue one video by hand
+  ingest <videoId> [--force]       Queue one video by hand (needs a YouTube API key)
+  add <file>                       Queue a local master file directly (no YouTube needed)
   jobs [state]                     List jobs
   approve <id> | reject <id>       Act on a job awaiting review
   ready                            List encoded files waiting to be published (JSON)
@@ -45,6 +46,8 @@ async function main(): Promise<number> {
       return withStore(cfg, (s) => tiktokLoginCmd(s, cfg));
     case "ingest":
       return withStore(cfg, (s) => ingestCmd(s, cfg, args));
+    case "add":
+      return withStore(cfg, (s) => addCmd(s, cfg, args[0]));
     case "jobs":
       return withStore(cfg, (s) => jobsCmd(s, args[0]));
     case "approve":
@@ -190,6 +193,50 @@ async function ingestCmd(store: Store, cfg: Config, args: string[]): Promise<num
     return 0;
   }
   process.stdout.write(`skipped ${videoId}: ${outcome.reason}\n`);
+  return 0;
+}
+
+/**
+ * Queues a file that is already on disk. No YouTube credentials involved:
+ * the title comes from the filename and the duration from the file itself.
+ */
+async function addCmd(store: Store, cfg: Config, file: string | undefined): Promise<number> {
+  if (!file) {
+    process.stderr.write("usage: add <file>\n");
+    return 1;
+  }
+  const { stat } = await import("node:fs/promises");
+  const { resolve } = await import("node:path");
+  const { localVideoId, titleFromFilename, isVideoFile } = await import("./source/watcher.js");
+  const { ingestLocalFile } = await import("./pipeline/ingest.js");
+
+  const path = resolve(file);
+  let size: number;
+  try {
+    const s = await stat(path);
+    if (!s.isFile()) throw new Error("not a file");
+    size = s.size;
+  } catch {
+    process.stderr.write(`cannot read ${path}\n`);
+    return 1;
+  }
+  if (!isVideoFile(path)) {
+    process.stderr.write(`${path} is not a recognised video file\n`);
+    return 1;
+  }
+
+  const outcome = await ingestLocalFile(store, cfg, {
+    path,
+    videoId: localVideoId(path),
+    title: titleFromFilename(path),
+    sizeBytes: size,
+  });
+
+  if (outcome.accepted) {
+    process.stdout.write(`queued ${path} as job(s) ${outcome.jobIds.join(", ")}\n`);
+    return 0;
+  }
+  process.stdout.write(`skipped ${path}: ${outcome.reason}\n`);
   return 0;
 }
 
@@ -463,8 +510,19 @@ async function whoamiCmd(store: Store, cfg: Config): Promise<number> {
       `nickname:  ${info.creator_nickname ?? "-"}\n` +
       `max post:  ${info.max_video_post_duration_sec ?? "?"}s\n` +
       `privacy:   ${options.join(", ") || "unknown"}\n` +
-      `configured: ${cfg.TIKTOK_PRIVACY_LEVEL} (mode=${cfg.TIKTOK_PUBLISH_MODE})\n`
+      `configured: ${cfg.TIKTOK_PRIVACY_LEVEL} (mode=${cfg.TIKTOK_PUBLISH_MODE})\n` +
+      `expected:  ${cfg.EXPECTED_TIKTOK_USERNAME ? `@${cfg.EXPECTED_TIKTOK_USERNAME}` : "(not set)"}\n`
   );
+
+  const { checkExpectedAccount } = await import("./tiktok/identity.js");
+  const identity = checkExpectedAccount(info, cfg.EXPECTED_TIKTOK_USERNAME);
+  if (!identity.ok) {
+    process.stdout.write(`\n  !!  ${identity.message}\n`);
+    return 1;
+  }
+  if (cfg.EXPECTED_TIKTOK_USERNAME) {
+    process.stdout.write(`\n  ok  destination matches EXPECTED_TIKTOK_USERNAME\n`);
+  }
 
   if (options.length && !options.includes(cfg.TIKTOK_PRIVACY_LEVEL)) {
     process.stdout.write(
@@ -498,6 +556,11 @@ async function doctorCmd(store: Store, cfg: Config): Promise<number> {
   if (!cfg.WEBSUB_SECRET) problems.push("WEBSUB_SECRET not set - the callback will reject notifications");
   if (!cfg.TIKTOK_CLIENT_KEY || !cfg.TIKTOK_CLIENT_SECRET) problems.push("TikTok credentials not set");
   if (!store.getTokens(PROVIDER)) problems.push("TikTok account not linked - run tiktok-login");
+  if (!cfg.EXPECTED_TIKTOK_USERNAME) {
+    problems.push(
+      "EXPECTED_TIKTOK_USERNAME not set - nothing would catch an authorisation approved on the wrong account"
+    );
+  }
   if (cfg.SOURCE_MODE === "command" && !cfg.SOURCE_COMMAND) {
     problems.push("SOURCE_MODE=command but SOURCE_COMMAND is empty");
   }

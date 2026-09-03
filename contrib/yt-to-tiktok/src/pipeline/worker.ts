@@ -11,6 +11,7 @@ import { resolveSource, SourceNotFoundError } from "../source/resolver.js";
 import { validateForHandoff } from "./handoff.js";
 import { TikTokApiError } from "../tiktok/api.js";
 import { getAccessToken } from "../tiktok/oauth.js";
+import { checkExpectedAccount } from "../tiktok/identity.js";
 import {
   fetchPublishStatus,
   initDirectPost,
@@ -219,9 +220,21 @@ async function stagePublish(store: Store, cfg: Config, job: JobRow): Promise<voi
 
   store.updateJob(job.id, { state: "publishing" });
 
+  // Fetched for inbox too when an expected handle is configured: the identity
+  // check matters more in a mode that would otherwise never look.
+  const creator =
+    cfg.TIKTOK_PUBLISH_MODE === "direct" || cfg.EXPECTED_TIKTOK_USERNAME
+      ? await queryCreatorInfo(accessToken)
+      : null;
+
+  if (creator) {
+    const identity = checkExpectedAccount(creator, cfg.EXPECTED_TIKTOK_USERNAME);
+    if (!identity.ok) throw new TerminalJobError(identity.message);
+  }
+
   let init: { publish_id: string; upload_url: string };
   if (cfg.TIKTOK_PUBLISH_MODE === "direct") {
-    const creator = await queryCreatorInfo(accessToken);
+    if (!creator) throw new TerminalJobError("creator info unavailable for a direct post");
 
     // Name the destination in the log. On an unattended public setup this is
     // the only place the account being posted to is ever stated.

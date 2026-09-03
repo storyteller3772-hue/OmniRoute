@@ -458,3 +458,129 @@ test("a permanently failed job does not leave its encoded file behind", maybe, a
     }
   );
 });
+
+// ---------------------------------------------------------------------------
+// watch-only operation: no YouTube credentials at all
+// ---------------------------------------------------------------------------
+
+test("a dropped master publishes with no YouTube API key and no tunnel", maybe, async () => {
+  const { ingestLocalFile } = await import("../src/pipeline/ingest.js");
+  const { localVideoId, titleFromFilename } = await import("../src/source/watcher.js");
+
+  const dir = await mkdtemp(join(tmpdir(), "yt2tt-watch-e2e-"));
+  const store = new Store(":memory:");
+  try {
+    const { mkdir, stat } = await import("node:fs/promises");
+    await mkdir(join(dir, "masters"), { recursive: true });
+    await mkdir(join(dir, "work"), { recursive: true });
+
+    // Deliberately no YOUTUBE_API_KEY, no YOUTUBE_CHANNEL_ID, no PUBLIC_URL.
+    const cfg = loadConfig({
+      DATA_DIR: dir,
+      WORK_DIR: join(dir, "work"),
+      SOURCE_DIR: join(dir, "masters"),
+      WATCH_MASTERS: "true",
+      CAPTION_HASHTAGS: "",
+      DRY_RUN: "true",
+      REQUIRE_REVIEW: "false",
+      VIDEO_PRESET: "ultrafast",
+      LOUDNESS_ENABLED: "false",
+    } as NodeJS.ProcessEnv);
+
+    const file = join(dir, "masters", "Donut Review Ep 4.mp4");
+    await makeMaster(file, 5, { width: 1080, height: 1920 });
+
+    const outcome = await ingestLocalFile(store, cfg, {
+      path: file,
+      videoId: localVideoId(file),
+      title: titleFromFilename(file),
+      sizeBytes: (await stat(file)).size,
+    });
+    assert.ok(outcome.accepted, "the file should have been queued");
+
+    await drain(store, cfg);
+
+    const job = store.listJobs()[0]!;
+    assert.equal(job.state, "published", `failed: ${job.last_error ?? ""}`);
+    assert.equal(job.caption, "Donut Review Ep 4", "caption comes from the filename");
+    // Duration was read from the file, not from the Data API.
+    assert.equal(store.getVideo(outcome.accepted ? outcome.videoId : "")?.duration_sec, 5);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("re-adding the same file does not queue it twice", maybe, async () => {
+  const { ingestLocalFile } = await import("../src/pipeline/ingest.js");
+  const { localVideoId, titleFromFilename } = await import("../src/source/watcher.js");
+
+  const dir = await mkdtemp(join(tmpdir(), "yt2tt-watch-dup-"));
+  const store = new Store(":memory:");
+  try {
+    const { mkdir, stat } = await import("node:fs/promises");
+    await mkdir(join(dir, "masters"), { recursive: true });
+    const cfg = loadConfig({
+      DATA_DIR: dir,
+      WORK_DIR: join(dir, "work"),
+      SOURCE_DIR: join(dir, "masters"),
+      WATCH_MASTERS: "true",
+      CAPTION_HASHTAGS: "",
+    } as NodeJS.ProcessEnv);
+
+    const file = join(dir, "masters", "clip.mp4");
+    await makeMaster(file, 3, { width: 1080, height: 1920 });
+    const watched = {
+      path: file,
+      videoId: localVideoId(file),
+      title: titleFromFilename(file),
+      sizeBytes: (await stat(file)).size,
+    };
+
+    assert.ok((await ingestLocalFile(store, cfg, watched)).accepted);
+    const second = await ingestLocalFile(store, cfg, watched);
+    assert.equal(second.accepted, false);
+    assert.equal(store.listJobs().length, 1);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a long dropped master is segmented using the duration read from the file", maybe, async () => {
+  const { ingestLocalFile } = await import("../src/pipeline/ingest.js");
+  const { localVideoId, titleFromFilename } = await import("../src/source/watcher.js");
+
+  const dir = await mkdtemp(join(tmpdir(), "yt2tt-watch-clip-"));
+  const store = new Store(":memory:");
+  try {
+    const { mkdir, stat } = await import("node:fs/promises");
+    await mkdir(join(dir, "masters"), { recursive: true });
+    const cfg = loadConfig({
+      DATA_DIR: dir,
+      WORK_DIR: join(dir, "work"),
+      SOURCE_DIR: join(dir, "masters"),
+      WATCH_MASTERS: "true",
+      CLIP_THRESHOLD_SECONDS: "8",
+      CLIP_TARGET_SECONDS: "5",
+      CLIP_MAX_COUNT: "2",
+      CAPTION_HASHTAGS: "",
+    } as NodeJS.ProcessEnv);
+
+    const file = join(dir, "masters", "long.mp4");
+    await makeMaster(file, 16, { width: 1080, height: 1920 });
+
+    const outcome = await ingestLocalFile(store, cfg, {
+      path: file,
+      videoId: localVideoId(file),
+      title: titleFromFilename(file),
+      sizeBytes: (await stat(file)).size,
+    });
+
+    assert.ok(outcome.accepted);
+    assert.equal(outcome.jobIds.length, 2, "should have segmented without any API call");
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

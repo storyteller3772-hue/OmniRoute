@@ -5,6 +5,8 @@ import { checkRuntimeConfig } from "./preflight.js";
 import { createHttpServer } from "./server.js";
 import { startWorker } from "./pipeline/worker.js";
 import { startPoller } from "./youtube/poller.js";
+import { startWatcher } from "./source/watcher.js";
+import { ingestLocalFile } from "./pipeline/ingest.js";
 import { callbackUrlFor, ensureSubscription, topicUrlFor } from "./youtube/websub.js";
 
 async function main(): Promise<void> {
@@ -66,10 +68,29 @@ async function main(): Promise<void> {
   const worker = startWorker(store, cfg);
   const poller = startPoller(store, cfg);
 
+  const watcher = cfg.WATCH_MASTERS
+    ? startWatcher({
+        dir: cfg.SOURCE_DIR,
+        intervalMs: cfg.WATCH_INTERVAL_SECONDS * 1000,
+        stableMs: cfg.WATCH_STABLE_SECONDS * 1000,
+        onFile: async (file) => {
+          const outcome = await ingestLocalFile(store, cfg, file);
+          if (!outcome.accepted && outcome.reason !== "already seen") {
+            logger.info({ file: file.path, reason: outcome.reason }, "skipped watched file");
+          }
+        },
+      })
+    : { stop: () => {} };
+
+  if (cfg.WATCH_MASTERS) {
+    logger.info({ dir: cfg.SOURCE_DIR }, "watching for new master files");
+  }
+
   const shutdown = (signal: string): void => {
     logger.info({ signal }, "shutting down");
     worker.stop();
     poller.stop();
+    watcher.stop();
     if (renewTimer) clearInterval(renewTimer);
     server.close(() => {
       store.close();

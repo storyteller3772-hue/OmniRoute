@@ -399,3 +399,96 @@ test("a privacy level the account does not offer fails before any upload", needs
     }
   });
 });
+
+test("publishing to an unexpected account fails before any upload", needsFfmpeg, async () => {
+  const size = 1024 * 1024;
+  await withMock(size, async ({ state, dir }) => {
+    const file = join(dir, "real.mp4");
+    state.expectedSize = await makeRealClip(file);
+
+    const store = new Store(":memory:");
+    try {
+      const cfg = loadConfig({
+        DATA_DIR: dir,
+        WORK_DIR: dir,
+        TIKTOK_PUBLISH_MODE: "direct",
+        TIKTOK_PRIVACY_LEVEL: "PUBLIC_TO_EVERYONE",
+        TIKTOK_CLIENT_KEY: "ck",
+        TIKTOK_CLIENT_SECRET: "cs",
+        TIKTOK_REDIRECT_URI: "https://example.test/cb",
+        // The mock reports @yellowdonutt.
+        EXPECTED_TIKTOK_USERNAME: "@someoneelse",
+        REQUIRE_REVIEW: "false",
+        CAPTION_HASHTAGS: "",
+      } as NodeJS.ProcessEnv);
+
+      store.saveTokens("tiktok", {
+        accessToken: "at-live",
+        refreshToken: "rt-live",
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      });
+      store.insertVideoIfNew({
+        videoId: "dQw4w9WgXcQ",
+        channelId: "UCabcdefghijklmnopqrstuv",
+        title: "t",
+        publishedAt: new Date().toISOString(),
+      });
+      const id = store.createJob("dQw4w9WgXcQ", 0);
+      store.updateJob(id, { state: "approved", output_path: file, caption: "t" });
+
+      await tick(store, cfg);
+
+      const job = store.getJob(id)!;
+      assert.equal(job.state, "failed");
+      assert.match(job.last_error ?? "", /@yellowdonutt/);
+      assert.match(job.last_error ?? "", /@someoneelse/);
+      assert.equal(state.ranges.length, 0, "nothing may be uploaded to the wrong account");
+    } finally {
+      store.close();
+    }
+  });
+});
+
+test("the guard also runs in inbox mode, which would otherwise never look", needsFfmpeg, async () => {
+  const size = 1024 * 1024;
+  await withMock(size, async ({ state, dir }) => {
+    const file = join(dir, "real.mp4");
+    state.expectedSize = await makeRealClip(file);
+
+    const store = new Store(":memory:");
+    try {
+      const cfg = loadConfig({
+        DATA_DIR: dir,
+        WORK_DIR: dir,
+        TIKTOK_PUBLISH_MODE: "inbox",
+        TIKTOK_CLIENT_KEY: "ck",
+        TIKTOK_CLIENT_SECRET: "cs",
+        TIKTOK_REDIRECT_URI: "https://example.test/cb",
+        EXPECTED_TIKTOK_USERNAME: "@someoneelse",
+        REQUIRE_REVIEW: "false",
+        CAPTION_HASHTAGS: "",
+      } as NodeJS.ProcessEnv);
+
+      store.saveTokens("tiktok", {
+        accessToken: "at-live",
+        refreshToken: "rt-live",
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      });
+      store.insertVideoIfNew({
+        videoId: "dQw4w9WgXcQ",
+        channelId: "UCabcdefghijklmnopqrstuv",
+        title: "t",
+        publishedAt: new Date().toISOString(),
+      });
+      const id = store.createJob("dQw4w9WgXcQ", 0);
+      store.updateJob(id, { state: "approved", output_path: file, caption: "t" });
+
+      await tick(store, cfg);
+
+      assert.equal(store.getJob(id)!.state, "failed");
+      assert.equal(state.ranges.length, 0);
+    } finally {
+      store.close();
+    }
+  });
+});

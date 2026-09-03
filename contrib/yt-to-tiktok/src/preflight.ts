@@ -81,9 +81,9 @@ export function checkRuntimeConfig(cfg: Config): PreflightResult {
     }
   }
 
-  if (!cfg.PUBLIC_URL) {
+  if (!cfg.PUBLIC_URL && !cfg.WATCH_MASTERS) {
     warnings.push("PUBLIC_URL is not set: no push notifications, polling only");
-  } else if (isEphemeralTunnel(cfg.PUBLIC_URL)) {
+  } else if (cfg.PUBLIC_URL && isEphemeralTunnel(cfg.PUBLIC_URL)) {
     // A URL that changes on restart breaks the registered redirect URI and
     // leaves the submitted policy links dead.
     warnings.push(
@@ -94,8 +94,18 @@ export function checkRuntimeConfig(cfg: Config): PreflightResult {
   if (!cfg.WEBSUB_SECRET && cfg.PUBLIC_URL) {
     warnings.push("WEBSUB_SECRET is not set: the callback will reject every notification");
   }
-  if (!cfg.YOUTUBE_API_KEY) {
+  if (!cfg.YOUTUBE_API_KEY && !cfg.WATCH_MASTERS) {
     warnings.push("YOUTUBE_API_KEY is not set: no metadata, no duration, no polling fallback");
+  }
+  if (cfg.WATCH_MASTERS && !cfg.YOUTUBE_API_KEY && !cfg.PUBLIC_URL) {
+    warnings.push(
+      "running in watch-only mode: drop a master into SOURCE_DIR to publish it (no YouTube credentials in use)"
+    );
+  }
+  if (cfg.TIKTOK_PUBLISH_MODE !== "handoff" && !cfg.EXPECTED_TIKTOK_USERNAME) {
+    warnings.push(
+      "EXPECTED_TIKTOK_USERNAME is not set: if the authorisation was approved while signed into the wrong TikTok account, nothing will catch it"
+    );
   }
   if (!cfg.YOUTUBE_CHANNEL_ID) {
     warnings.push("YOUTUBE_CHANNEL_ID is not set: uploads from any channel would be accepted");

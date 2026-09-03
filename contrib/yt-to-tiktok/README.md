@@ -49,6 +49,35 @@ YouTube upload
 5. **Review.** The job stops. You approve it in the web UI or the CLI.
 6. **Publish.** Chunked upload to TikTok, then status polling until it lands.
 
+## The short path
+
+The full setup wants a YouTube API key, a public tunnel and a TikTok app. Two of
+those three are optional:
+
+```ini
+WATCH_MASTERS=true
+```
+
+With that on, dropping an export into `data/masters/` is the entire trigger. The
+title comes from the filename, the duration is read from the file with ffprobe,
+and nothing has to reach you from outside — so **no YouTube API key and no
+tunnel**. Or queue one by hand:
+
+```bash
+npm run cli -- add ~/Exports/"Donut Review Ep 4.mp4"
+```
+
+The WebSub path stays available if you later want it triggered by the YouTube
+upload itself rather than by the file. What cannot be skipped is the TikTok app
+and the authorisation click: posting is authenticated by an OAuth token, and
+TikTok only issues one when you sign in and approve.
+
+If you skip the tunnel, host the two legal pages statically instead:
+
+```bash
+npm run cli -- legal-export ./legal-export   # then GitHub Pages
+```
+
 ## Requirements
 
 - Node.js ≥ 22.5 (uses the built-in `node:sqlite`, so there is no native build step)
@@ -380,6 +409,18 @@ Set `REVIEW_TOKEN` if the server is reachable from anywhere but localhost.
 Clip selection is a plain time-slicer — predictable and free. `planClips()` in
 `src/media/clip.ts` is the seam to replace with a transcript-driven picker.
 
+### Guarding the destination
+
+```ini
+EXPECTED_TIKTOK_USERNAME=@yellowdonutt
+```
+
+The destination is a property of the stored OAuth token, not a setting — so
+approving the authorisation link while signed into the wrong TikTok account
+silently retargets every future post, and nothing else would notice. With this
+set, the linked account is checked before every publish (in inbox mode too) and
+a mismatch fails the job before a byte is uploaded. `cli whoami` reports it.
+
 ### If you already shoot vertical
 
 `auto` (the default) does not touch footage that is already publishable. The
@@ -413,7 +454,7 @@ all resolve to one job.
 ## Tests
 
 ```bash
-npm test          # 271 tests, node:test
+npm test          # 295 tests, node:test
 npm run typecheck
 ```
 

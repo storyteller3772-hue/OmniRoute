@@ -65,6 +65,15 @@ const schema = z.object({
    */
   SOURCE_COMMAND: z.string().optional(),
   SOURCE_COMMAND_TIMEOUT_SECONDS: z.coerce.number().int().min(10).default(900),
+  /**
+   * Treat any new file dropped into SOURCE_DIR as a publish trigger. Removes
+   * the need for a YouTube API key and a public tunnel: duration is read from
+   * the file and nothing has to reach us from outside.
+   */
+  WATCH_MASTERS: bool.default("false"),
+  WATCH_INTERVAL_SECONDS: z.coerce.number().int().min(1).default(10),
+  /** A file must stop changing for this long before it is considered complete. */
+  WATCH_STABLE_SECONDS: z.coerce.number().int().min(1).default(15),
   /** `local` mode: how long to wait for a master file to appear before failing. */
   SOURCE_WAIT_SECONDS: z.coerce.number().int().min(0).default(0),
 
@@ -113,6 +122,18 @@ const schema = z.object({
    * (see README - "Handoff mode"); the pipeline never talks to TikTok itself.
    */
   TIKTOK_PUBLISH_MODE: z.enum(["inbox", "direct", "handoff"]).default("inbox"),
+  /**
+   * The @handle posts are expected to land on. When set, the linked account is
+   * checked against it before every publish and a mismatch fails the job.
+   *
+   * The destination comes from whichever account approved the OAuth flow, so
+   * approving while signed into the wrong account silently retargets the whole
+   * pipeline. This is the only thing that catches that.
+   */
+  EXPECTED_TIKTOK_USERNAME: z
+    .string()
+    .transform((v) => v.trim().replace(/^@+/, "").toLowerCase())
+    .optional(),
   TIKTOK_PRIVACY_LEVEL: z
     .enum([
       "PUBLIC_TO_EVERYONE",

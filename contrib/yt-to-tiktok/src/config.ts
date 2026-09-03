@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parseTikTokHandle } from "./tiktok/identity.js";
 
 /**
  * All configuration is environment-driven and validated at startup. A bad value
@@ -132,7 +133,18 @@ const schema = z.object({
    */
   EXPECTED_TIKTOK_USERNAME: z
     .string()
-    .transform((v) => v.trim().replace(/^@+/, "").toLowerCase())
+    .transform((v, ctx) => {
+      const handle = parseTikTokHandle(v);
+      if (!handle) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "expected a handle or a profile URL, e.g. @yourhandle or https://www.tiktok.com/@yourhandle",
+        });
+        return z.NEVER;
+      }
+      return handle;
+    })
     .optional(),
   TIKTOK_PRIVACY_LEVEL: z
     .enum([

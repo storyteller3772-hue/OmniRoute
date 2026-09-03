@@ -113,6 +113,7 @@ NGROK_DOMAIN="${NGROK_DOMAIN#https://}"; NGROK_DOMAIN="${NGROK_DOMAIN%/}"
 LEGAL_CONTACT_EMAIL="$(ask LEGAL_CONTACT_EMAIL 'Contact email for the legal pages')"
 LEGAL_ENTITY_NAME="$(ask LEGAL_ENTITY_NAME 'Name to show on the legal pages' 'Yellow Donut')"
 YT_HANDLE="$(ask YT_HANDLE 'YouTube channel handle' '@yellowdonutt')"
+EXPECTED_TIKTOK_USERNAME="$(ask EXPECTED_TIKTOK_USERNAME 'TikTok account posts must land on (handle or profile URL)')"
 
 PUBLIC_URL="https://${NGROK_DOMAIN}"
 
@@ -181,6 +182,8 @@ TIKTOK_REDIRECT_URI=${PUBLIC_URL}/oauth/tiktok/callback
 TIKTOK_PUBLISH_MODE=direct
 TIKTOK_PRIVACY_LEVEL=SELF_ONLY
 REQUIRE_REVIEW=true
+# Verified before every publish; a mismatch fails the job before any upload.
+EXPECTED_TIKTOK_USERNAME=${EXPECTED_TIKTOK_USERNAME}
 
 LEGAL_ENTITY_NAME=${LEGAL_ENTITY_NAME}
 LEGAL_CONTACT_EMAIL=${LEGAL_CONTACT_EMAIL}

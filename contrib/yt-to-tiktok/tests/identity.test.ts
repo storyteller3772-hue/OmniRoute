@@ -72,3 +72,80 @@ test("that warning goes away once it is set", async () => {
   );
   assert.ok(!warnings.some((w) => /EXPECTED_TIKTOK_USERNAME/.test(w)));
 });
+
+// ---------------------------------------------------------------------------
+// handle parsing
+// ---------------------------------------------------------------------------
+
+import { parseTikTokHandle } from "../src/tiktok/identity.js";
+
+test("a profile URL from the share sheet yields the handle, tracking dropped", () => {
+  assert.equal(
+    parseTikTokHandle("https://www.tiktok.com/@jdidhdududjdjjdjdidjf?_r=1&_t=ZS-99QPAI9vevV"),
+    "jdidhdududjdjjdjdidjf"
+  );
+});
+
+test("the plain forms all work", () => {
+  for (const input of ["@yellowdonutt", "yellowdonutt", "  @YellowDonutt  "]) {
+    assert.equal(parseTikTokHandle(input), "yellowdonutt", input);
+  }
+});
+
+test("URL variants are accepted", () => {
+  for (const input of [
+    "https://tiktok.com/@yellowdonutt",
+    "https://www.tiktok.com/@yellowdonutt",
+    "https://www.tiktok.com/@yellowdonutt/",
+    "https://www.tiktok.com/@yellowdonutt/video/7412345678901234567",
+    "HTTPS://WWW.TIKTOK.COM/@YellowDonutt",
+  ]) {
+    assert.equal(parseTikTokHandle(input), "yellowdonutt", input);
+  }
+});
+
+test("a short link is refused rather than guessed at", () => {
+  // These resolve only by following a redirect, so nothing offline can trust them.
+  assert.equal(parseTikTokHandle("https://vm.tiktok.com/ZS99QPAI9/"), null);
+  assert.equal(parseTikTokHandle("https://vt.tiktok.com/ZS99QPAI9/"), null);
+});
+
+test("URLs that name no account are refused", () => {
+  for (const input of [
+    "https://www.tiktok.com/",
+    "https://www.tiktok.com/foryou",
+    "https://www.tiktok.com/tag/donut",
+    "https://example.com/@yellowdonutt",
+    "https://notiktok.com/@yellowdonutt",
+  ]) {
+    assert.equal(parseTikTokHandle(input), null, input);
+  }
+});
+
+test("malformed handles are refused", () => {
+  for (const input of ["", "   ", "@", "with space", "a".repeat(25), "bad!chars", "@@"]) {
+    assert.equal(parseTikTokHandle(input), null, JSON.stringify(input));
+  }
+});
+
+test("periods and underscores are valid in a handle", () => {
+  assert.equal(parseTikTokHandle("@yellow.donut_t"), "yellow.donut_t");
+});
+
+test("config rejects an unparseable expected account at startup", () => {
+  assert.throws(
+    () => loadConfig({ EXPECTED_TIKTOK_USERNAME: "https://vm.tiktok.com/ZS99/" } as NodeJS.ProcessEnv),
+    /profile URL/
+  );
+  assert.throws(
+    () => loadConfig({ EXPECTED_TIKTOK_USERNAME: "not a handle!" } as NodeJS.ProcessEnv),
+    /EXPECTED_TIKTOK_USERNAME/
+  );
+});
+
+test("config accepts the pasted share-sheet URL", () => {
+  const cfg = loadConfig({
+    EXPECTED_TIKTOK_USERNAME: "https://www.tiktok.com/@jdidhdududjdjjdjdidjf?_r=1&_t=ZS-99QPAI9vevV",
+  } as NodeJS.ProcessEnv);
+  assert.equal(cfg.EXPECTED_TIKTOK_USERNAME, "jdidhdududjdjjdjdidjf");
+});

@@ -412,7 +412,9 @@ Clip selection is a plain time-slicer — predictable and free. `planClips()` in
 ### Guarding the destination
 
 ```ini
-EXPECTED_TIKTOK_USERNAME=@yellowdonutt
+EXPECTED_TIKTOK_USERNAME=@yourhandle
+# or paste the profile URL straight from the share sheet:
+# EXPECTED_TIKTOK_USERNAME=https://www.tiktok.com/@yourhandle?_r=1&_t=...
 ```
 
 The destination is a property of the stored OAuth token, not a setting — so
@@ -454,7 +456,7 @@ all resolve to one job.
 ## Tests
 
 ```bash
-npm test          # 295 tests, node:test
+npm test          # 304 tests, node:test
 npm run typecheck
 ```
 

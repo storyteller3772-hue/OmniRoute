@@ -144,6 +144,13 @@ subscription goes active. Check it with `npm run cli -- status`.
 **4. Link TikTok**
 
 ```bash
+npm run cli -- set-tiktok-app     # prompts for key and secret, input hidden
+```
+
+Credentials are read with echo off and written straight to `.env` at mode 600,
+so neither value passes through argv, shell history, or `ps`.
+
+```bash
 npm run cli -- tiktok-login
 ```
 
@@ -456,7 +463,7 @@ all resolve to one job.
 ## Tests
 
 ```bash
-npm test          # 304 tests, node:test
+npm test          # 313 tests, node:test
 npm run typecheck
 ```
 

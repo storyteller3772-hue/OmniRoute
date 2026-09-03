@@ -11,6 +11,7 @@ const USAGE = `yt-to-tiktok
   resolve-channel <@handle|UC...>  Look up the channel id and uploads playlist
   subscribe                        Ask the WebSub hub to start pushing uploads
   unsubscribe                      Cancel the push subscription
+  set-tiktok-app                   Store the TikTok client key and secret in .env
   tiktok-login                     Print the TikTok authorisation URL
   ingest <videoId> [--force]       Queue one video by hand (needs a YouTube API key)
   add <file>                       Queue a local master file directly (no YouTube needed)
@@ -42,6 +43,8 @@ async function main(): Promise<number> {
       return subscribeCmd(cfg, "subscribe");
     case "unsubscribe":
       return subscribeCmd(cfg, "unsubscribe");
+    case "set-tiktok-app":
+      return setTikTokAppCmd();
     case "tiktok-login":
       return withStore(cfg, (s) => tiktokLoginCmd(s, cfg));
     case "ingest":
@@ -132,6 +135,53 @@ async function subscribeCmd(cfg: Config, mode: "subscribe" | "unsubscribe"): Pro
     `${mode} request accepted by the hub.\n` +
       `The hub will now call ${callbackUrlFor(cfg.PUBLIC_URL as string)} to verify.\n` +
       `The server must be running and publicly reachable for that to succeed.\n`
+  );
+  return 0;
+}
+
+/**
+ * Stores the app credentials without them passing through argv, where they
+ * would land in shell history and be visible to `ps`.
+ */
+async function setTikTokAppCmd(): Promise<number> {
+  const { promptHidden, updateEnvFile } = await import("./envfile.js");
+  const { resolve } = await import("node:path");
+
+  process.stdout.write(
+    "From developers.tiktok.com -> your app -> Credentials.\nInput is hidden.\n\n"
+  );
+
+  let clientKey: string;
+  let clientSecret: string;
+  try {
+    clientKey = await promptHidden("  Client key:    ");
+    clientSecret = await promptHidden("  Client secret: ");
+  } catch (err) {
+    process.stderr.write(`\n${(err as Error).message}\n`);
+    return 1;
+  }
+
+  if (!clientKey || !clientSecret) {
+    process.stderr.write("both values are required\n");
+    return 1;
+  }
+  if (/\s/.test(clientKey) || /\s/.test(clientSecret)) {
+    process.stderr.write("values must not contain whitespace - check for a stray paste\n");
+    return 1;
+  }
+
+  const envPath = resolve(".env");
+  await updateEnvFile(envPath, {
+    TIKTOK_CLIENT_KEY: clientKey,
+    TIKTOK_CLIENT_SECRET: clientSecret,
+  });
+
+  // Confirm by length only; neither value is echoed back.
+  process.stdout.write(
+    `\nWritten to ${envPath} (mode 600, previous copy at .env.bak)\n` +
+      `  client key:    ${clientKey.length} characters\n` +
+      `  client secret: ${clientSecret.length} characters\n\n` +
+      `Next:\n  node dist/cli.js tiktok-login\n  node dist/cli.js whoami\n`
   );
   return 0;
 }

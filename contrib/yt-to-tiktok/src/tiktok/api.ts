@@ -1,6 +1,14 @@
 export const TIKTOK_API_BASE = "https://open.tiktokapis.com";
 export const TIKTOK_AUTH_BASE = "https://www.tiktok.com";
 
+/**
+ * Resolved per call so a test (or an egress proxy) can redirect the API without
+ * threading a base URL through every signature. Unset in normal operation.
+ */
+export function apiBase(): string {
+  return process.env.TIKTOK_API_BASE_URL || TIKTOK_API_BASE;
+}
+
 export interface TikTokEnvelope<T> {
   data?: T;
   error?: { code?: string; message?: string; log_id?: string };
@@ -33,7 +41,7 @@ export async function callTikTok<T>(
   path: string,
   init: { accessToken: string; body?: unknown; method?: string }
 ): Promise<T> {
-  const res = await fetch(`${TIKTOK_API_BASE}${path}`, {
+  const res = await fetch(`${apiBase()}${path}`, {
     method: init.method ?? "POST",
     headers: {
       Authorization: `Bearer ${init.accessToken}`,

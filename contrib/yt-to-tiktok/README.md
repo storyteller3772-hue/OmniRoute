@@ -413,7 +413,7 @@ all resolve to one job.
 ## Tests
 
 ```bash
-npm test          # 264 tests, node:test
+npm test          # 271 tests, node:test
 npm run typecheck
 ```
 
@@ -422,6 +422,15 @@ master, the actual job state machine drives it through sourcing, encoding,
 preflight and the review gate, and the output is probed to confirm it really is
 1080x1920 with audio intact. Only the upload itself is stubbed (`DRY_RUN`),
 since that needs live credentials. It skips itself when FFmpeg is absent.
+
+`tests/tiktok-publish.test.ts` runs the real publish code against a stand-in
+that enforces the Content Posting API's contract — floor()-based chunk counts,
+inclusive `Content-Range` offsets, a final chunk carrying the remainder, every
+byte accounted for. It covers the full direct-post sequence (creator_info →
+init → chunked upload → status poll), token refresh, chunk retry on a transient
+5xx, and rejection of a privacy level the account does not offer. This is the
+path that cannot be exercised with live credentials until the app is
+registered, and where a mistake costs an audit cycle.
 
 The rest covers the parts where a subtle mistake is expensive: TikTok's chunk arithmetic,
 WebSub signature verification, feed parsing against malformed input, caption

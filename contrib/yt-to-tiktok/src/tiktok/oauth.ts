@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { TIKTOK_API_BASE, TIKTOK_AUTH_BASE } from "./api.js";
+import { apiBase, TIKTOK_AUTH_BASE } from "./api.js";
 import type { Store } from "../db.js";
 
 export const PROVIDER = "tiktok";
@@ -79,7 +79,7 @@ export function buildAuthorizeUrl(o: {
  * the rest of the API uses, so it cannot share `callTikTok`.
  */
 async function postToken(form: Record<string, string>): Promise<TokenResponse> {
-  const res = await fetch(`${TIKTOK_API_BASE}/v2/oauth/token/`, {
+  const res = await fetch(`${apiBase()}/v2/oauth/token/`, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",

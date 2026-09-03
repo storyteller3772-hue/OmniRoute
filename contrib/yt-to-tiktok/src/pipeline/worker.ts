@@ -152,6 +152,11 @@ async function stageEncode(store: Store, cfg: Config, job: JobRow): Promise<void
 
   const { size: bytes } = await stat(output);
 
+  // Record the path the moment the file exists, before anything that can throw.
+  // Preflight below rejects some encodes; without the path already stored, the
+  // failure handler has nothing to clean up and the file is orphaned on disk.
+  store.updateJob(job.id, { output_path: output });
+
   // In handoff mode the file is validated against the publisher's limits now,
   // while the cause is still local and cheap to fix, rather than after an
   // upload that TikTok may only reject asynchronously.
@@ -347,6 +352,11 @@ export async function tick(store: Store, cfg: Config): Promise<number> {
       if (terminal) {
         logger.error({ jobId: job.id, attempts, err: message }, "job failed permanently");
         store.updateJob(job.id, { state: "failed", attempts, last_error: message });
+        // Re-read rather than trusting `job`: that is a snapshot from before
+        // the stage ran, and the stage records output_path as soon as the file
+        // exists. Using the stale copy would leave every failed encode on disk.
+        const current = store.getJob(job.id);
+        await cleanupWorkFile(current?.output_path ?? job.output_path);
       } else {
         const delay = jitter(backoffMs(attempts));
         logger.warn(

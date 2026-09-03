@@ -188,3 +188,30 @@ test("a job cannot be created for a video that was never recorded", () => {
     store.close();
   }
 });
+
+test("the token database is created owner-only, not world-readable", async () => {
+  const { mkdtemp, rm, stat } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const dir = await mkdtemp(join(tmpdir(), "yt2tt-perm-"));
+  try {
+    const dbPath = join(dir, "nested", "yt2tt.sqlite");
+    const store = new Store(dbPath);
+    try {
+      store.saveTokens("tiktok", { accessToken: "secret-token", refreshToken: "secret-refresh" });
+      const mode = (await stat(dbPath)).mode & 0o777;
+      assert.equal(
+        mode & 0o077,
+        0,
+        `database holding OAuth tokens is group/world accessible (mode ${mode.toString(8)})`
+      );
+      const dirMode = (await stat(join(dir, "nested"))).mode & 0o777;
+      assert.equal(dirMode & 0o077, 0, `data directory is group/world accessible (${dirMode.toString(8)})`);
+    } finally {
+      store.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

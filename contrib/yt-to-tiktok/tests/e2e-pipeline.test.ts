@@ -436,3 +436,25 @@ test("clipping a vertical source still re-encodes, for frame-accurate cuts", may
     }
   );
 });
+
+test("a permanently failed job does not leave its encoded file behind", maybe, async () => {
+  await withPipeline(
+    { TIKTOK_PUBLISH_MODE: "handoff", CLIP_THRESHOLD_SECONDS: "600" },
+    async ({ dir, store, cfg }) => {
+      const { mkdir, readdir } = await import("node:fs/promises");
+      await mkdir(join(dir, "masters"), { recursive: true });
+      // Under the 3s floor, so preflight fails it terminally after encoding.
+      await makeMaster(join(dir, "masters", `${VIDEO}.mp4`), 2);
+
+      seed(store, 2);
+      const id = store.createJob(VIDEO, 0);
+      await drain(store, cfg);
+
+      assert.equal(store.getJob(id)!.state, "failed");
+
+      const leftovers = await readdir(join(dir, "work")).catch(() => [] as string[]);
+      const mp4s = leftovers.filter((f) => f.endsWith(".mp4"));
+      assert.deepEqual(mp4s, [], `failed job left files behind: ${mp4s.join(", ")}`);
+    }
+  );
+});

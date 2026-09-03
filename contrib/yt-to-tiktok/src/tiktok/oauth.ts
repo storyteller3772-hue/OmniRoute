@@ -18,6 +18,34 @@ export interface TokenResponse {
   token_type?: string;
 }
 
+/** A login link is short-lived on purpose; an abandoned one should not stay usable. */
+export const LOGIN_TTL_MS = 15 * 60 * 1000;
+
+/**
+ * Begins an authorisation: mints the PKCE pair and the CSRF state, records them,
+ * and returns the URL to open. The state is what the callback checks.
+ */
+export function startLogin(
+  store: Store,
+  o: { clientKey: string; redirectUri: string; scopes: string[] },
+  now = Date.now()
+): { url: string; state: string; expiresAt: Date } {
+  const verifier = generateCodeVerifier();
+  const state = randomBytes(24).toString("base64url");
+  store.createPendingLogin(state, verifier, LOGIN_TTL_MS, now);
+  return {
+    url: buildAuthorizeUrl({
+      clientKey: o.clientKey,
+      redirectUri: o.redirectUri,
+      scopes: o.scopes,
+      state,
+      codeChallenge: codeChallengeFrom(verifier),
+    }),
+    state,
+    expiresAt: new Date(now + LOGIN_TTL_MS),
+  };
+}
+
 export function generateCodeVerifier(): string {
   return randomBytes(48).toString("base64url");
 }

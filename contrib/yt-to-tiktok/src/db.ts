@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /**
@@ -97,6 +97,13 @@ const MIGRATIONS: string[] = [
      scope              TEXT,
      updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
    );`,
+  `CREATE TABLE IF NOT EXISTS oauth_pending (
+     state         TEXT PRIMARY KEY,
+     code_verifier TEXT NOT NULL,
+     provider      TEXT NOT NULL DEFAULT 'tiktok',
+     expires_at    TEXT NOT NULL,
+     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+   );`,
   `CREATE TABLE IF NOT EXISTS websub_subscriptions (
      topic            TEXT PRIMARY KEY,
      callback         TEXT NOT NULL,
@@ -124,9 +131,13 @@ export class Store {
   readonly db: DatabaseSync;
 
   constructor(path: string) {
-    if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
+    if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path);
     this.db.exec("PRAGMA journal_mode = WAL;");
+    // This file holds OAuth access and refresh tokens. Left at the default
+    // umask it is world-readable, which on a shared machine hands anyone with
+    // a login the ability to post as the operator.
+    if (path !== ":memory:") restrictPermissions(path);
     this.db.exec("PRAGMA foreign_keys = ON;");
     this.db.exec("PRAGMA busy_timeout = 5000;");
     this.migrate();
@@ -318,6 +329,46 @@ export class Store {
     );
   }
 
+  // ---------- pending oauth logins ----------
+
+  /**
+   * Records a login the operator actually started. The callback will only
+   * accept a `state` that appears here, which is what stops anyone who can
+   * reach the public callback from having their own authorisation code
+   * exchanged and their account stored in place of the operator's.
+   */
+  createPendingLogin(state: string, codeVerifier: string, ttlMs: number, now = Date.now()): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO oauth_pending (state, code_verifier, expires_at)
+         VALUES (?, ?, ?)`
+      )
+      .run(state, codeVerifier, new Date(now + ttlMs).toISOString());
+  }
+
+  /**
+   * Single use: the row is deleted whether or not it had expired, so a state
+   * cannot be replayed even if the exchange that follows fails.
+   */
+  consumePendingLogin(state: string, now = Date.now()): { codeVerifier: string } | null {
+    const found = row<{ state: string; code_verifier: string; expires_at: string }>(
+      this.db.prepare("SELECT * FROM oauth_pending WHERE state = ?").get(state)
+    );
+    this.db.prepare("DELETE FROM oauth_pending WHERE state = ?").run(state);
+    if (!found) return null;
+    if (Date.parse(found.expires_at) <= now) return null;
+    return { codeVerifier: found.code_verifier };
+  }
+
+  /** Housekeeping so abandoned logins do not accumulate. */
+  purgeExpiredLogins(now = Date.now()): number {
+    return Number(
+      this.db
+        .prepare("DELETE FROM oauth_pending WHERE expires_at <= ?")
+        .run(new Date(now).toISOString()).changes
+    );
+  }
+
   // ---------- websub ----------
 
   upsertSubscription(
@@ -368,6 +419,20 @@ export interface SubscriptionRow {
   state: string;
   lease_expires_at: string | null;
   last_verified_at: string | null;
+}
+
+/**
+ * Tightens the database and its WAL sidecars to owner-only. Best effort: on
+ * filesystems without POSIX modes this is a no-op rather than a failure.
+ */
+function restrictPermissions(path: string): void {
+  for (const f of [path, `${path}-wal`, `${path}-shm`]) {
+    try {
+      chmodSync(f, 0o600);
+    } catch {
+      /* not yet created, or a filesystem without modes */
+    }
+  }
 }
 
 export function openStore(dataDir: string): Store {

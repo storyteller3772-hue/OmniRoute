@@ -4,14 +4,7 @@ import { run } from "./media/ffmpeg.js";
 import { ingestCandidate } from "./pipeline/ingest.js";
 import { getVideoDetails, resolveChannel } from "./youtube/api.js";
 import { callbackUrlFor, sendSubscriptionRequest, topicUrlFor } from "./youtube/websub.js";
-import {
-  buildAuthorizeUrl,
-  codeChallengeFrom,
-  generateCodeVerifier,
-  PROVIDER,
-  SCOPE_DIRECT,
-  SCOPE_INBOX,
-} from "./tiktok/oauth.js";
+import { PROVIDER, SCOPE_DIRECT, SCOPE_INBOX, startLogin } from "./tiktok/oauth.js";
 
 const USAGE = `yt-to-tiktok
 
@@ -49,7 +42,7 @@ async function main(): Promise<number> {
     case "unsubscribe":
       return subscribeCmd(cfg, "unsubscribe");
     case "tiktok-login":
-      return tiktokLoginCmd(cfg);
+      return withStore(cfg, (s) => tiktokLoginCmd(s, cfg));
     case "ingest":
       return withStore(cfg, (s) => ingestCmd(s, cfg, args));
     case "jobs":
@@ -140,25 +133,24 @@ async function subscribeCmd(cfg: Config, mode: "subscribe" | "unsubscribe"): Pro
   return 0;
 }
 
-function tiktokLoginCmd(cfg: Config): number {
+async function tiktokLoginCmd(store: Store, cfg: Config): Promise<number> {
   if (!cfg.TIKTOK_CLIENT_KEY || !cfg.TIKTOK_REDIRECT_URI) {
     process.stderr.write("TIKTOK_CLIENT_KEY and TIKTOK_REDIRECT_URI are required\n");
     return 1;
   }
-  const verifier = generateCodeVerifier();
-  const url = buildAuthorizeUrl({
+
+  store.purgeExpiredLogins();
+  const { url, expiresAt } = startLogin(store, {
     clientKey: cfg.TIKTOK_CLIENT_KEY,
     redirectUri: cfg.TIKTOK_REDIRECT_URI,
     scopes: cfg.TIKTOK_PUBLISH_MODE === "direct" ? SCOPE_DIRECT : SCOPE_INBOX,
-    state: generateCodeVerifier().slice(0, 16),
-    codeChallenge: codeChallengeFrom(verifier),
   });
 
   process.stdout.write(
-    `1. Start the server with this in its environment:\n\n` +
-      `   YT2TT_PKCE_VERIFIER=${verifier}\n\n` +
-      `2. Open this URL and approve:\n\n   ${url}\n\n` +
-      `3. TikTok redirects to ${cfg.TIKTOK_REDIRECT_URI}, which stores the tokens.\n`
+    `Open this and approve, signed in as the account you want to post to:\n\n` +
+      `  ${url}\n\n` +
+      `The link expires ${expiresAt.toISOString()} and works once.\n` +
+      `The server must be running to receive the redirect.\n`
   );
   return 0;
 }

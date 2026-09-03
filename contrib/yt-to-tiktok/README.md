@@ -118,9 +118,15 @@ subscription goes active. Check it with `npm run cli -- status`.
 npm run cli -- tiktok-login
 ```
 
-It prints a `YT2TT_PKCE_VERIFIER` to put in the server's environment and an
-authorisation URL to open. Approving it redirects to
+It prints a single-use authorisation URL that expires in 15 minutes. Open it
+signed in as the account you want to post to; approving redirects to
 `/oauth/tiktok/callback`, which stores the tokens.
+
+The callback only accepts a login this instance started — it matches the `state`
+against a recorded pending login and consumes it. That callback is publicly
+reachable by necessity, and without the check anyone who knew the URL could have
+their own authorisation code exchanged and their account stored in place of
+yours.
 
 **5. Put your masters where it can find them**
 
@@ -407,7 +413,7 @@ all resolve to one job.
 ## Tests
 
 ```bash
-npm test          # 253 tests, node:test
+npm test          # 264 tests, node:test
 npm run typecheck
 ```
 

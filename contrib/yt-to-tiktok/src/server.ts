@@ -159,20 +159,44 @@ async function handle(
   // ---- TikTok OAuth callback ----
   if (path === "/oauth/tiktok/callback" && req.method === "GET") {
     const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
     const error = url.searchParams.get("error");
-    if (error) return send(res, 400, `TikTok authorisation failed: ${error}`);
+
+    // Reflected back to the browser, so bound in length and stripped of
+    // anything but the plain token TikTok actually sends.
+    if (error) {
+      return send(res, 400, `TikTok authorisation failed: ${error.replace(/[^\w .-]/g, "").slice(0, 120)}`);
+    }
+
+    // This callback is public by necessity - the hub and TikTok must reach it.
+    // Without a state that matches a login WE started, anyone who knows the URL
+    // could have their own authorisation code exchanged and their account
+    // stored in place of the operator's, and the pipeline would then publish
+    // to it.
+    if (!state) {
+      logger.warn({ ip: req.socket.remoteAddress }, "OAuth callback with no state - rejected");
+      return send(res, 400, "missing state");
+    }
+    const pending = store.consumePendingLogin(state);
+    if (!pending) {
+      logger.warn(
+        { ip: req.socket.remoteAddress },
+        "OAuth callback with an unknown or expired state - rejected"
+      );
+      return send(res, 403, "unrecognised or expired login. Run `cli tiktok-login` and use the fresh link.");
+    }
+
     if (!code) return send(res, 400, "missing code");
     if (!cfg.TIKTOK_CLIENT_KEY || !cfg.TIKTOK_CLIENT_SECRET || !cfg.TIKTOK_REDIRECT_URI) {
       return send(res, 503, "TikTok credentials are not configured");
     }
 
-    const verifier = process.env.YT2TT_PKCE_VERIFIER;
     const tokens = await exchangeCode({
       clientKey: cfg.TIKTOK_CLIENT_KEY,
       clientSecret: cfg.TIKTOK_CLIENT_SECRET,
       code,
       redirectUri: cfg.TIKTOK_REDIRECT_URI,
-      codeVerifier: verifier,
+      codeVerifier: pending.codeVerifier,
     });
     persistTokens(store, tokens);
     logger.info({ openId: tokens.open_id, scope: tokens.scope }, "TikTok account linked");

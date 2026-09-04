@@ -82,3 +82,33 @@ test("writing to a file that does not exist yet works", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("an empty commented-out placeholder is filled in where it sits", () => {
+  // .env.example ships keys as `#KEY=` because an empty value fails validation
+  // where an absent key falls back to the default. That placeholder is the
+  // key's home in the file, so set-tiktok-app should fill it in there rather
+  // than appending the credential below every section heading.
+  const input = "# ---- tiktok ----\n#TIKTOK_CLIENT_KEY=\n#TIKTOK_CLIENT_SECRET=\n\n# ---- safety ----\nDRY_RUN=true";
+  const out = setEnvValues(input, { TIKTOK_CLIENT_KEY: "abc123" });
+  assert.match(out, /^TIKTOK_CLIENT_KEY=abc123$/m, "the placeholder is filled in");
+  assert.equal(/^TIKTOK_CLIENT_KEY=/m.test(out.split("# ---- safety ----")[0] ?? ""), true,
+    "and stays in its own section rather than being appended at the end");
+  assert.match(out, /^#TIKTOK_CLIENT_SECRET=$/m, "untouched placeholders stay commented");
+  assert.equal(out.match(/TIKTOK_CLIENT_KEY/g)?.length, 1, "exactly one occurrence - no duplicate");
+});
+
+test("a commented-out key that still holds a value is left alone", () => {
+  // Distinct from the empty-placeholder case above: this may be an old
+  // credential kept as a record, so it stays a comment and the new value is
+  // appended instead.
+  const out = setEnvValues("# SECRET=old\nOTHER=1", { SECRET: "new" });
+  assert.match(out, /^# SECRET=old$/m);
+  assert.match(out, /^SECRET=new$/m);
+});
+
+test("a live assignment wins over an empty placeholder for the same key", () => {
+  const out = setEnvValues("#K=\nK=real", { K: "updated" });
+  assert.match(out, /^#K=$/m, "the placeholder is left as a comment");
+  assert.match(out, /^K=updated$/m, "the live assignment is the one that changed");
+  assert.equal(out.match(/^K=/gm)?.length, 1, "no duplicate live key");
+});

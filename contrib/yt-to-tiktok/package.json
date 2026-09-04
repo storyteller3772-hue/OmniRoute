@@ -11,10 +11,10 @@
     "yt2tt": "./dist/cli.js"
   },
   "scripts": {
-    "dev": "node --import tsx/esm src/main.ts",
-    "cli": "node --import tsx/esm src/cli.ts",
+    "dev": "node --env-file-if-exists=.env --import tsx/esm src/main.ts",
+    "cli": "node --env-file-if-exists=.env --import tsx/esm src/cli.ts",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/main.js",
+    "start": "node --env-file-if-exists=.env dist/main.js",
     "test": "node --import tsx/esm --test tests/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

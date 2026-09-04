@@ -24,6 +24,29 @@ export function setEnvValues(content: string, updates: Record<string, string>): 
     return `${m[1]}${key}=${value}`;
   });
 
+  // A key can also be present as an EMPTY commented-out placeholder - that is
+  // how .env.example ships every value it cannot supply, because an empty
+  // string fails validation where an absent key falls back to the default.
+  // That placeholder is the key's home in the file, under its own heading, so
+  // fill it in rather than appending a duplicate at the bottom.
+  //
+  // Only an empty one. A commented-out key that still carries a value may be an
+  // old credential the operator kept as a record, and overwriting it would
+  // destroy that; those stay comments. Runs after every live assignment above
+  // has been matched, so a real value always wins over a placeholder.
+  if (remaining.size) {
+    for (const [i, line] of out.entries()) {
+      const c = /^(\s*)#\s*([A-Za-z_][A-Za-z0-9_]*)\s*=[ \t]*$/.exec(line);
+      if (!c) continue;
+      const key = c[2] as string;
+      if (!remaining.has(key)) continue;
+      const value = remaining.get(key) as string;
+      remaining.delete(key);
+      out[i] = `${c[1]}${key}=${value}`;
+      if (!remaining.size) break;
+    }
+  }
+
   // Anything the file did not already mention is appended.
   if (remaining.size) {
     if (out.length && out.at(-1)?.trim() !== "") out.push("");

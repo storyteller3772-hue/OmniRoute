@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Auto-repurpose your own YouTube uploads to your own TikTok account: WebSub trigger, FFmpeg reformat, official TikTok Content Posting API.",
   "engines": {
-    "node": ">=22.5.0 <23 || >=24.0.0 <27"
+    "node": ">=22.9.0 <23 || >=24.0.0 <27"
   },
   "bin": {
     "yt2tt": "./dist/cli.js"

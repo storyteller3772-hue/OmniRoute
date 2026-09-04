@@ -83,7 +83,9 @@ npm run cli -- legal-export ./legal-export   # then GitHub Pages
 
 ## Requirements
 
-- Node.js ≥ 22.5 (uses the built-in `node:sqlite`, so there is no native build step)
+- Node.js ≥ 22.9 (uses the built-in `node:sqlite`, so there is no native build step;
+  22.9 is the floor because the start scripts load `.env` with `--env-file-if-exists`,
+  which older 22.x rejects as an unknown flag before the app ever runs)
 - FFmpeg and FFprobe on `PATH`
 - A YouTube Data API v3 key
 - A TikTok developer app with the Content Posting API product enabled

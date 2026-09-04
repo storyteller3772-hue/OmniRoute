@@ -4,7 +4,14 @@ import type { Config } from "../config.js";
 import type { JobRow, Store } from "../db.js";
 import { logger } from "../logger.js";
 import { backoffMs, jitter, sqlTimestampIn } from "../util/time.js";
-import { buildTranscodeArgs, measureLoudness, probe, run, transcode } from "../media/ffmpeg.js";
+import {
+  buildTranscodeArgs,
+  FfmpegError,
+  measureLoudness,
+  probe,
+  run,
+  transcode,
+} from "../media/ffmpeg.js";
 import { buildAudioOnlyArgs, buildCopyArgs, decideEncodePlan } from "../media/plan.js";
 import { buildLoudnormApplyFilter } from "../media/filters.js";
 import { resolveSource, SourceNotFoundError } from "../source/resolver.js";
@@ -67,6 +74,13 @@ async function stageSource(store: Store, cfg: Config, job: JobRow): Promise<void
 
 async function stageEncode(store: Store, cfg: Config, job: JobRow): Promise<void> {
   if (!job.source_path) throw new TerminalJobError("job reached encode with no source path");
+
+  // Not only stageSource's job: ingestLocalFile() starts a watched file at
+  // "processing" because the master is already on disk, so a job can reach the
+  // encoder having never passed through sourcing. Without this, ffmpeg is asked
+  // to write into a directory nobody created and exits -2 (ENOENT), which
+  // surfaces as an opaque "exited with code 4294967294" five retries in a row.
+  await mkdir(resolve(cfg.WORK_DIR), { recursive: true });
 
   const info = await probe(cfg.FFPROBE_PATH, job.source_path);
   if (!info.hasVideo) throw new TerminalJobError(`${job.source_path} has no video stream`);
@@ -343,6 +357,20 @@ async function cleanupWorkFile(path: string | null): Promise<void> {
   }
 }
 
+/**
+ * The last few meaningful lines of an ffmpeg stderr tail. ffmpeg narrates its
+ * whole configuration before it fails, and the tail runs to 4000 characters;
+ * the cause is almost always in the closing lines, and a log line nobody can
+ * read is barely better than the one this replaces.
+ */
+function lastLines(stderr: string, count = 4): string | undefined {
+  const lines = stderr
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  return lines.length ? lines.slice(-count).join(" | ") : undefined;
+}
+
 function isTerminal(err: unknown): boolean {
   if (err instanceof TerminalJobError) return true;
   if (err instanceof TikTokApiError) return err.isTerminal;
@@ -361,9 +389,17 @@ export async function tick(store: Store, cfg: Config): Promise<number> {
       const message = (err as Error).message ?? String(err);
       const attempts = job.attempts + 1;
       const terminal = isTerminal(err) || attempts >= cfg.MAX_ATTEMPTS;
+      // ffmpeg's own words. FfmpegError has always captured the stderr tail but
+      // nothing ever logged it, so a failed encode read only as "exited with
+      // code 4294967294" - an unsigned -2 - while the line naming the actual
+      // cause sat unread in the error object.
+      const ffmpegStderr = err instanceof FfmpegError ? lastLines(err.stderrTail) : undefined;
 
       if (terminal) {
-        logger.error({ jobId: job.id, attempts, err: message }, "job failed permanently");
+        logger.error(
+          { jobId: job.id, attempts, err: message, ffmpegStderr },
+          "job failed permanently"
+        );
         store.updateJob(job.id, { state: "failed", attempts, last_error: message });
         // Re-read rather than trusting `job`: that is a snapshot from before
         // the stage ran, and the stage records output_path as soon as the file
@@ -373,7 +409,7 @@ export async function tick(store: Store, cfg: Config): Promise<number> {
       } else {
         const delay = jitter(backoffMs(attempts));
         logger.warn(
-          { jobId: job.id, attempts, retryInMs: delay, err: message },
+          { jobId: job.id, attempts, retryInMs: delay, err: message, ffmpegStderr },
           "job failed, will retry"
         );
         store.updateJob(job.id, {

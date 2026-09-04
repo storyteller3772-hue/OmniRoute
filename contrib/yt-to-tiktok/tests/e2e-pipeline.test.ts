@@ -472,7 +472,12 @@ test("a dropped master publishes with no YouTube API key and no tunnel", maybe, 
   try {
     const { mkdir, stat } = await import("node:fs/promises");
     await mkdir(join(dir, "masters"), { recursive: true });
-    await mkdir(join(dir, "work"), { recursive: true });
+    // WORK_DIR is deliberately NOT created here. A watched file skips sourcing
+    // and enters the queue already "processing", so nothing on this path had
+    // ever created it outside setup.sh: the first real drop on a fresh install
+    // failed five times over with ffmpeg's opaque -2 while this test passed,
+    // because this test used to make the directory that production did not.
+    // Creating it here again would re-blind the suite to that whole class.
 
     // Deliberately no YOUTUBE_API_KEY, no YOUTUBE_CHANNEL_ID, no PUBLIC_URL.
     const cfg = loadConfig({

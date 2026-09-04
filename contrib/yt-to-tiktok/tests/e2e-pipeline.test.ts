@@ -589,3 +589,51 @@ test("a long dropped master is segmented using the duration read from the file",
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("a master that vanishes before encoding fails once, not five times", maybe, async () => {
+  // Renaming a file inside SOURCE_DIR queues the name the watcher saw, and that
+  // name is gone by the time the encoder looks. Observed for real: a download
+  // renamed after landing left a job retrying ffprobe for seven minutes.
+  const { ingestLocalFile } = await import("../src/pipeline/ingest.js");
+  const { localVideoId, titleFromFilename } = await import("../src/source/watcher.js");
+
+  const dir = await mkdtemp(join(tmpdir(), "yt2tt-vanish-e2e-"));
+  const store = new Store(":memory:");
+  try {
+    const { mkdir, rm: rmFile } = await import("node:fs/promises");
+    await mkdir(join(dir, "masters"), { recursive: true });
+
+    const cfg = loadConfig({
+      DATA_DIR: dir,
+      WORK_DIR: join(dir, "work"),
+      SOURCE_DIR: join(dir, "masters"),
+      WATCH_MASTERS: "true",
+      DRY_RUN: "true",
+      REQUIRE_REVIEW: "false",
+      LOUDNESS_ENABLED: "false",
+    } as NodeJS.ProcessEnv);
+
+    const file = join(dir, "masters", "renamed away.mp4");
+    await makeMaster(file, 2, { width: 1080, height: 1920 });
+
+    const { stat: statFile } = await import("node:fs/promises");
+    await ingestLocalFile(store, cfg, {
+      path: file,
+      videoId: localVideoId(file),
+      title: titleFromFilename(file),
+      sizeBytes: (await statFile(file)).size,
+    });
+
+    // The rename happens between the watcher queueing it and the encoder running.
+    await rmFile(file);
+    await drain(store, cfg);
+
+    const job = store.listJobs()[0]!;
+    assert.equal(job.state, "failed");
+    assert.equal(job.attempts, 1, `terminal, so it must not burn retries (was ${job.attempts})`);
+    assert.match(job.last_error ?? "", /no longer exists/);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

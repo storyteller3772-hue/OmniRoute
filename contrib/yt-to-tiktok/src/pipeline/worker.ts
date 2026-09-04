@@ -82,6 +82,17 @@ async function stageEncode(store: Store, cfg: Config, job: JobRow): Promise<void
   // surfaces as an opaque "exited with code 4294967294" five retries in a row.
   await mkdir(resolve(cfg.WORK_DIR), { recursive: true });
 
+  // A master that is no longer there is never coming back, so retrying is just
+  // five ffprobe failures spread over seven minutes. This happens for real:
+  // renaming a file inside SOURCE_DIR queues the name it had when the watcher
+  // saw it, and a sync tool that writes then renames does the same. Fail it
+  // now, with a message that says what happened.
+  try {
+    await stat(job.source_path);
+  } catch {
+    throw new TerminalJobError(`master no longer exists: ${job.source_path}`);
+  }
+
   const info = await probe(cfg.FFPROBE_PATH, job.source_path);
   if (!info.hasVideo) throw new TerminalJobError(`${job.source_path} has no video stream`);
 

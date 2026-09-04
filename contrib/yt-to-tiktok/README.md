@@ -474,7 +474,7 @@ all resolve to one job.
 ## Tests
 
 ```bash
-npm test          # 313 tests, node:test
+npm test          # 317 tests, node:test - green on Windows and Linux
 npm run typecheck
 ```
 

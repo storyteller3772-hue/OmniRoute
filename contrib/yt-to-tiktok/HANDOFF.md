@@ -16,13 +16,17 @@ A pipeline that takes the operator's own video masters, reformats them for
 TikTok, and publishes them to their own TikTok account. Standalone project under
 `contrib/` with its own `package.json`; it does not import from OmniRoute.
 
-**317 tests. 313 pass on Windows; all pass on Linux.** Typecheck and build clean.
+**317 tests, all passing on Windows and Linux.** Typecheck and build clean.
 
-The four Windows failures are test-side POSIX assumptions, not defects: two
-assert file modes `chmod` cannot set on NTFS, one hardcodes a `/`-rooted path,
-and one runs a POSIX shell one-liner through `cmd.exe`. **Node ≥ 22.9** is the
-floor now — the start scripts load `.env` with `--env-file-if-exists`, which
-older 22.x rejects as an unknown flag before any code runs.
+Four of them used to fail on Windows for reasons that were never defects — two
+asserted file modes `chmod` cannot set on NTFS, one hardcoded a `/`-rooted path,
+one ran a POSIX shell one-liner through `cmd.exe` (and littered the repo with a
+file named `$YT2TT_OUTPUT_PATH`). All four now assert the same guarantees in a
+platform-appropriate way, so a red suite means something again.
+
+**Node ≥ 22.9** is the floor — the start scripts load `.env` with
+`--env-file-if-exists`, which older 22.x rejects as an unknown flag before any
+code runs.
 
 ## What is already done
 
@@ -168,7 +172,7 @@ session had declared it done:**
 
 ```bash
 ./setup.sh                       # everything automatable, safe to re-run
-npm test                         # 317 tests (4 fail on Windows only)
+npm test                         # 317 tests
 npm run cli -- doctor            # what is missing
 npm run cli -- set-tiktok-app    # credentials, hidden input
 npm run cli -- tiktok-login      # single-use auth link

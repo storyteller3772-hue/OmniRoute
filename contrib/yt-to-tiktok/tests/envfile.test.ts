@@ -65,8 +65,14 @@ test("writing backs up the previous file and locks permissions down", async () =
 
     assert.match(await readFile(`${envPath}.bak`, "utf8"), /TIKTOK_CLIENT_KEY=$/m);
 
-    const mode = (await stat(envPath)).mode & 0o777;
-    assert.equal(mode & 0o077, 0, `.env holds a client secret but is mode ${mode.toString(8)}`);
+    // POSIX only. NTFS has no such bits and chmod is a no-op there, so on
+    // Windows this asserts nothing about the real access control - it just
+    // reports 0o666 and fails. The guarantee still holds where it is the
+    // mechanism that provides it, which includes every server this deploys to.
+    if (process.platform !== "win32") {
+      const mode = (await stat(envPath)).mode & 0o777;
+      assert.equal(mode & 0o077, 0, `.env holds a client secret but is mode ${mode.toString(8)}`);
+    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

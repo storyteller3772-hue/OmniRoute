@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { assertInside, resolveLocal, resolveSource } from "../src/source/resolver.js";
 
 const VIDEO = "dQw4w9WgXcQ";
@@ -96,9 +96,13 @@ test("a manifest entry cannot escape the source directory", () => {
 });
 
 test("paths inside the source directory are allowed", () => {
-  assert.equal(assertInside("/masters", "clip.mp4"), "/masters/clip.mp4");
-  assert.equal(assertInside("/masters", "sub/clip.mp4"), "/masters/sub/clip.mp4");
-  assert.equal(assertInside("/masters", "/masters/clip.mp4"), "/masters/clip.mp4");
+  // Built with resolve/join rather than written as "/masters/clip.mp4": the
+  // guard returns a resolved path, and on Windows resolving "/masters" yields
+  // "C:\masters". Hardcoding the POSIX form tested the separator, not the rule.
+  const base = resolve("/masters");
+  assert.equal(assertInside(base, "clip.mp4"), join(base, "clip.mp4"));
+  assert.equal(assertInside(base, "sub/clip.mp4"), join(base, "sub", "clip.mp4"));
+  assert.equal(assertInside(base, join(base, "clip.mp4")), join(base, "clip.mp4"));
 });
 
 test("a directory that merely shares a name prefix is not treated as inside", () => {
@@ -154,10 +158,18 @@ test("command mode passes values through the environment, never the command line
   await withDir(async (dir) => {
     // The command writes whatever it was given in the env, proving the values
     // arrived out-of-band rather than interpolated into the script text.
+    //
+    // Driven through node rather than a shell one-liner. The command runs under
+    // `shell: true`, which is cmd.exe on Windows, where `$VAR` is not expansion
+    // and `> "$YT2TT_OUTPUT_PATH"` cheerfully creates a file of that literal
+    // name - the test failed and littered the repo. node is present by
+    // definition here and reads process.env identically everywhere, so this
+    // tests the claim rather than the shell.
     const out = await resolveSource(VIDEO, {
       mode: "command",
       sourceDir: dir,
-      command: 'printf "%s" "$YT2TT_VIDEO_ID" > "$YT2TT_OUTPUT_PATH"',
+      command:
+        'node -e "require(\'fs\').writeFileSync(process.env.YT2TT_OUTPUT_PATH, process.env.YT2TT_VIDEO_ID)"',
       commandTimeoutMs: 15_000,
       waitSeconds: 0,
       workDir: dir,

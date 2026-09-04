@@ -310,6 +310,12 @@ Tunnel alternatives.
 
 ## Running it 24/7
 
+A laptop cannot publish while it is asleep. For a complete free always-on
+install — Oracle Cloud's Always Free tier, folder sync for the masters, and the
+TikTok authorisation done over an SSH tunnel so nothing is ever exposed to the
+internet — follow **[`deploy/oracle-free-vps.md`](deploy/oracle-free-vps.md)**.
+It needs no tunnel service, no YouTube API key and no public URL.
+
 Unattended posting needs the process to survive reboots. `deploy/` has both:
 
 ```bash
